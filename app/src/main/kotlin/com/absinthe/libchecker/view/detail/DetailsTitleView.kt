@@ -8,7 +8,12 @@ import android.view.ViewGroup
 import androidx.appcompat.widget.AppCompatImageView
 import androidx.appcompat.widget.AppCompatTextView
 import androidx.core.view.marginStart
+import androidx.core.view.marginTop
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
 import com.absinthe.libchecker.R
+import com.absinthe.libchecker.recyclerview.HorizontalSpacesItemDecoration
+import com.absinthe.libchecker.recyclerview.adapter.detail.AbiLabelsAdapter
 import com.absinthe.libchecker.utils.extensions.getColor
 import com.absinthe.libchecker.utils.extensions.getColorByAttr
 import com.absinthe.libchecker.utils.extensions.getDimensionPixelSize
@@ -70,7 +75,7 @@ class DetailsTitleView(context: Context, attributeSet: AttributeSet? = null) :
   val extraInfoView = AppCompatTextView(
     ContextThemeWrapper(
       context,
-      R.style.TextView_SansSerifCondensed
+      R.style.TextView_SansSerifCondensedMedium
     )
   ).apply {
     layoutParams = LayoutParams(
@@ -80,6 +85,28 @@ class DetailsTitleView(context: Context, attributeSet: AttributeSet? = null) :
     setTextColor(android.R.color.darker_gray.getColor(context))
     setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
     addView(this)
+  }
+
+  val abiLabelsAdapter = AbiLabelsAdapter()
+
+  val abiLabelsRecyclerView = RecyclerView(context).apply {
+    layoutParams = LayoutParams(
+      ViewGroup.LayoutParams.WRAP_CONTENT,
+      ViewGroup.LayoutParams.WRAP_CONTENT
+    ).also {
+      it.topMargin = 4.dp
+      it.marginStart = (-4).dp
+    }
+    overScrollMode = RecyclerView.OVER_SCROLL_NEVER
+    adapter = abiLabelsAdapter
+    layoutManager = LinearLayoutManager(context, LinearLayoutManager.HORIZONTAL, false)
+    isHorizontalScrollBarEnabled = false
+    clipToPadding = false
+    clipChildren = false
+    isNestedScrollingEnabled = false
+    setHasFixedSize(true)
+    addItemDecoration(HorizontalSpacesItemDecoration(4.dp))
+    this@DetailsTitleView.addView(this)
   }
 
   override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
@@ -103,13 +130,21 @@ class DetailsTitleView(context: Context, attributeSet: AttributeSet? = null) :
       textWidth.toExactlyMeasureSpec(),
       extraInfoView.defaultHeightMeasureSpec(this)
     )
-    setMeasuredDimension(
-      measuredWidth,
-      paddingTop +
-        appNameView.measuredHeight +
+    abiLabelsRecyclerView.measure(
+      textWidth.toExactlyMeasureSpec(),
+      abiLabelsRecyclerView.defaultHeightMeasureSpec(this)
+    )
+    val basicInfoTotalHeight =
+      appNameView.measuredHeight +
         packageNameView.measuredHeight +
         versionInfoView.measuredHeight +
         extraInfoView.measuredHeight +
+        abiLabelsRecyclerView.measuredHeight +
+        abiLabelsRecyclerView.marginTop
+    setMeasuredDimension(
+      measuredWidth,
+      paddingTop +
+        (basicInfoTotalHeight).coerceAtLeast(iconView.measuredHeight) +
         paddingBottom
     )
   }
@@ -120,5 +155,10 @@ class DetailsTitleView(context: Context, attributeSet: AttributeSet? = null) :
     packageNameView.layout(appNameView.left, appNameView.bottom)
     versionInfoView.layout(appNameView.left, packageNameView.bottom)
     extraInfoView.layout(appNameView.left, versionInfoView.bottom)
+    abiLabelsRecyclerView.layout(appNameView.left + abiLabelsRecyclerView.marginStart, extraInfoView.bottom + abiLabelsRecyclerView.marginTop)
+  }
+
+  companion object {
+    private const val MEGA_BYTE_SI_UNITS = 1000 * 1000
   }
 }

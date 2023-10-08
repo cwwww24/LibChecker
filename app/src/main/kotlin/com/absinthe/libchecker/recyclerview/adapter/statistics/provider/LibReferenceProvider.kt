@@ -2,15 +2,13 @@ package com.absinthe.libchecker.recyclerview.adapter.statistics.provider
 
 import android.graphics.ColorMatrix
 import android.graphics.ColorMatrixColorFilter
-import android.graphics.Typeface
-import android.text.SpannableString
-import android.text.Spanned
-import android.text.style.StyleSpan
-import android.view.ContextThemeWrapper
 import android.view.View
 import android.view.ViewGroup
 import android.widget.TextView
-import androidx.lifecycle.LifecycleCoroutineScope
+import androidx.core.text.buildSpannedString
+import androidx.core.text.italic
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.lifecycleScope
 import com.absinthe.libchecker.R
 import com.absinthe.libchecker.annotation.ACTIVITY
 import com.absinthe.libchecker.annotation.NATIVE
@@ -18,10 +16,10 @@ import com.absinthe.libchecker.annotation.PERMISSION
 import com.absinthe.libchecker.annotation.PROVIDER
 import com.absinthe.libchecker.annotation.RECEIVER
 import com.absinthe.libchecker.annotation.SERVICE
-import com.absinthe.libchecker.base.BaseActivity
-import com.absinthe.libchecker.bean.LibReference
 import com.absinthe.libchecker.constant.GlobalValues
+import com.absinthe.libchecker.model.LibReference
 import com.absinthe.libchecker.recyclerview.adapter.statistics.LibReferenceAdapter
+import com.absinthe.libchecker.ui.base.BaseActivity
 import com.absinthe.libchecker.ui.fragment.detail.LibDetailDialogFragment
 import com.absinthe.libchecker.utils.extensions.getDimensionPixelSize
 import com.absinthe.libchecker.utils.extensions.tintHighlightText
@@ -37,7 +35,7 @@ import kotlinx.coroutines.withContext
 
 const val LIB_REFERENCE_PROVIDER = 0
 
-class LibReferenceProvider(val lifecycleScope: LifecycleCoroutineScope) : BaseNodeProvider() {
+class LibReferenceProvider : BaseNodeProvider() {
 
   override val itemViewType: Int = LIB_REFERENCE_PROVIDER
   override val layoutId: Int = 0
@@ -48,13 +46,13 @@ class LibReferenceProvider(val lifecycleScope: LifecycleCoroutineScope) : BaseNo
 
   override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): BaseViewHolder {
     return BaseViewHolder(
-      LibReferenceItemView(ContextThemeWrapper(context, R.style.AppListMaterialCard)).apply {
+      LibReferenceItemView(context).apply {
         layoutParams = ViewGroup.MarginLayoutParams(
           ViewGroup.LayoutParams.MATCH_PARENT,
           ViewGroup.LayoutParams.WRAP_CONTENT
         ).also {
           val margin = context.getDimensionPixelSize(R.dimen.main_card_margin)
-          it.setMargins(margin, margin, margin, margin)
+          it.setMargins(0, margin, 0, margin)
         }
       }
     )
@@ -80,19 +78,16 @@ class LibReferenceProvider(val lifecycleScope: LifecycleCoroutineScope) : BaseNo
         setOrHighlightText(labelName, it.name)
       } ?: let {
         if (libReferenceItem.type == PERMISSION && libReferenceItem.libName.startsWith("android.permission")) {
-          icon.setImageResource(R.drawable.ic_lib_android)
+          icon.setImageResource(com.absinthe.lc.rulesbundle.R.drawable.ic_lib_android)
         } else {
           icon.setImageResource(R.drawable.ic_question)
         }
-        val spannableString = SpannableString(context.getString(R.string.not_marked_lib))
-        val colorSpanit = StyleSpan(Typeface.ITALIC)
-        spannableString.setSpan(
-          colorSpanit,
-          0,
-          spannableString.length,
-          Spanned.SPAN_INCLUSIVE_EXCLUSIVE
-        )
-        labelName.text = spannableString
+
+        labelName.text = buildSpannedString {
+          italic {
+            append(context.getString(R.string.not_marked_lib))
+          }
+        }
       }
     }
   }
@@ -104,12 +99,13 @@ class LibReferenceProvider(val lifecycleScope: LifecycleCoroutineScope) : BaseNo
       if (ref.type == NATIVE || ref.type == SERVICE || ref.type == ACTIVITY || ref.type == RECEIVER || ref.type == PROVIDER) {
         val name = ref.libName
 
-        lifecycleScope.launch(Dispatchers.IO) {
+        (context as? LifecycleOwner)?.lifecycleScope?.launch(Dispatchers.IO) {
           val regexName = LCRules.getRule(name, ref.type, true)?.regexName
 
           withContext(Dispatchers.Main) {
+            (context as BaseActivity<*>).findViewById<View>(androidx.appcompat.R.id.search_src_text)?.clearFocus()
             LibDetailDialogFragment.newInstance(name, ref.type, regexName)
-              .show((context as BaseActivity<*>).supportFragmentManager, "LibDetailDialogFragment")
+              .show((context as BaseActivity<*>).supportFragmentManager, LibDetailDialogFragment::class.java.name)
           }
         }
       }

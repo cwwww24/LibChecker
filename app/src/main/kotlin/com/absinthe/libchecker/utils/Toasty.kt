@@ -1,6 +1,5 @@
 package com.absinthe.libchecker.utils
 
-import android.annotation.SuppressLint
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
@@ -19,15 +18,14 @@ import java.lang.ref.WeakReference
  * time : 2020/08/12
  * </pre>
  */
-@SuppressLint("WrongThread")
 object Toasty {
-
   private val handler = Handler(Looper.getMainLooper())
-  private var toast: Toast? = null
+  private var toastRef: WeakReference<Toast>? = null
 
   @AnyThread
   fun showShort(context: Context, message: String) {
-    if (Looper.getMainLooper().thread === Thread.currentThread()) {
+    if (Looper.getMainLooper() == Looper.myLooper()) {
+      //noinspection WrongThread
       show(context, message, Toast.LENGTH_SHORT)
     } else {
       handler.post { show(context, message, Toast.LENGTH_SHORT) }
@@ -41,7 +39,8 @@ object Toasty {
 
   @AnyThread
   fun showLong(context: Context, message: String) {
-    if (Looper.getMainLooper().thread === Thread.currentThread()) {
+    if (Looper.getMainLooper() == Looper.myLooper()) {
+      //noinspection WrongThread
       show(context, message, Toast.LENGTH_LONG)
     } else {
       handler.post { show(context, message, Toast.LENGTH_LONG) }
@@ -56,27 +55,22 @@ object Toasty {
   @Suppress("deprecation")
   @MainThread
   private fun show(context: Context, message: String, duration: Int) {
-    toast?.cancel()
+    toastRef?.get()?.cancel()
 
-    WeakReference(context).get()?.let { ctx ->
-      if (LCAppUtils.atLeastR() && context !is ContextThemeWrapper) {
-        Toast(ctx).also {
-          it.duration = duration
-          it.setText(message)
-          toast = it
-        }.show()
-      } else {
-        val view = ToastView(ctx).also {
-          it.message.text = message
-        }
-        Toast(ctx).also {
-          it.setGravity(Gravity.CENTER_HORIZONTAL or Gravity.BOTTOM, 0, 200)
-          it.duration = duration
-          it.view = view
-          toast = it
-        }.show()
+    val toast = if (OsUtils.atLeastR() && context !is ContextThemeWrapper) {
+      Toast.makeText(context, message, duration)
+    } else {
+      val view = ToastView(context).also {
+        it.message.text = message
+      }
+      Toast(context).also {
+        it.setGravity(Gravity.CENTER_HORIZONTAL or Gravity.BOTTOM, 0, 200)
+        it.duration = duration
+        it.view = view
       }
     }
+    toastRef = WeakReference(toast)
+    toast.show()
   }
 }
 

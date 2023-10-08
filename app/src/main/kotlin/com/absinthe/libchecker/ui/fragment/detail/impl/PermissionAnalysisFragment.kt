@@ -2,21 +2,22 @@ package com.absinthe.libchecker.ui.fragment.detail.impl
 
 import com.absinthe.libchecker.R
 import com.absinthe.libchecker.annotation.PERMISSION
-import com.absinthe.libchecker.bean.LibStringItemChip
+import com.absinthe.libchecker.compat.VersionCompat
 import com.absinthe.libchecker.databinding.FragmentLibComponentBinding
+import com.absinthe.libchecker.model.LibStringItemChip
 import com.absinthe.libchecker.recyclerview.diff.LibStringDiffUtil
 import com.absinthe.libchecker.ui.detail.EXTRA_PACKAGE_NAME
-import com.absinthe.libchecker.ui.fragment.BaseDetailFragment
+import com.absinthe.libchecker.ui.fragment.BaseFilterAnalysisFragment
 import com.absinthe.libchecker.ui.fragment.EXTRA_TYPE
 import com.absinthe.libchecker.ui.fragment.detail.LocatedCount
+import com.absinthe.libchecker.utils.extensions.getColor
 import com.absinthe.libchecker.utils.extensions.putArguments
-import com.absinthe.libchecker.utils.showToast
 import rikka.core.util.ClipboardUtils
 
-class PermissionAnalysisFragment : BaseDetailFragment<FragmentLibComponentBinding>() {
+class PermissionAnalysisFragment : BaseFilterAnalysisFragment<FragmentLibComponentBinding>() {
 
   override fun getRecyclerView() = binding.list
-  override val needShowLibDetailDialog = false
+  override val needShowLibDetailDialog = true
 
   override fun init() {
     binding.apply {
@@ -50,17 +51,47 @@ class PermissionAnalysisFragment : BaseDetailFragment<FragmentLibComponentBindin
       animationEnable = true
       setOnItemLongClickListener { _, _, position ->
         ClipboardUtils.put(requireContext(), getItem(position).item.name)
-        context.showToast(R.string.toast_copied_to_clipboard)
+        VersionCompat.showCopiedOnClipboardToast(context)
         true
       }
       setDiffCallback(LibStringDiffUtil())
       setEmptyView(emptyView)
     }
-    viewModel.initPermissionData(packageName)
+
+    viewModel.packageInfoLiveData.observe(viewLifecycleOwner) {
+      if (it != null) {
+        viewModel.initPermissionData()
+      }
+    }
   }
 
-  override fun getFilterList(text: String): List<LibStringItemChip>? {
+  override fun onVisibilityChanged(visible: Boolean) {
+    super.onVisibilityChanged(visible)
+    if (context != null && visible) {
+      if (hasNonGrantedPermissions()) {
+        val label = requireContext().getString(R.string.permission_not_granted)
+        val color = R.color.material_red_400.getColor(requireContext())
+        viewModel.processMapLiveData.postValue(
+          mapOf(label to color)
+        )
+      } else {
+        viewModel.processMapLiveData.postValue(emptyMap())
+      }
+    } else {
+      viewModel.processMapLiveData.postValue(viewModel.processesMap)
+    }
+  }
+
+  override fun getFilterListByText(text: String): List<LibStringItemChip>? {
     return viewModel.permissionsItems.value?.filter { it.item.name.contains(text, true) }
+  }
+
+  override fun getFilterList(process: String?): List<LibStringItemChip>? {
+    return if (process.isNullOrEmpty()) {
+      viewModel.permissionsItems.value
+    } else {
+      viewModel.permissionsItems.value?.filter { it.item.size == 0L }
+    }
   }
 
   companion object {

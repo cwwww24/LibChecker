@@ -1,6 +1,7 @@
 package com.absinthe.libchecker.view.snapshot
 
 import android.content.Context
+import android.text.TextUtils
 import android.util.AttributeSet
 import android.util.TypedValue
 import android.view.ContextThemeWrapper
@@ -35,6 +36,8 @@ class ComparisonDashboardHalfView(context: Context, attributeSet: AttributeSet? 
       setTextColor(context.getColorByAttr(com.google.android.material.R.attr.colorOnSurface))
       setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
       text = context.getString(R.string.album_click_to_choose)
+      maxLines = 1
+      ellipsize = TextUtils.TruncateAt.MIDDLE
     }
 
   private val tvSnapshotAppsCountTitle =
@@ -45,7 +48,7 @@ class ComparisonDashboardHalfView(context: Context, attributeSet: AttributeSet? 
       ).also {
         it.topMargin = 5.dp
       }
-      text = context.getString(R.string.snapshot_apps_count)
+      text = context.getString(R.string.comparison_snapshot_apps_count)
       setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
     }
 
@@ -89,7 +92,7 @@ class ComparisonDashboardHalfView(context: Context, attributeSet: AttributeSet? 
     }
     tvSnapshotTimestampText.let {
       it.measure(
-        it.defaultWidthMeasureSpec(this),
+        textWidth.toExactlyMeasureSpec(),
         it.defaultHeightMeasureSpec(this)
       )
     }
@@ -101,7 +104,7 @@ class ComparisonDashboardHalfView(context: Context, attributeSet: AttributeSet? 
     }
     tvSnapshotAppsCountText.let {
       it.measure(
-        it.defaultWidthMeasureSpec(this),
+        textWidth.toExactlyMeasureSpec(),
         it.defaultHeightMeasureSpec(this)
       )
     }

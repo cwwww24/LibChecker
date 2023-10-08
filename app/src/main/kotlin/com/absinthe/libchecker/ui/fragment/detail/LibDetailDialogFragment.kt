@@ -10,26 +10,31 @@ import coil.load
 import com.absinthe.libchecker.R
 import com.absinthe.libchecker.annotation.LibType
 import com.absinthe.libchecker.annotation.NATIVE
-import com.absinthe.libchecker.base.BaseBottomSheetViewDialogFragment
+import com.absinthe.libchecker.constant.GlobalValues
+import com.absinthe.libchecker.constant.URLManager
 import com.absinthe.libchecker.utils.extensions.putArguments
-import com.absinthe.libchecker.view.app.BottomSheetHeaderView
+import com.absinthe.libchecker.utils.showToast
 import com.absinthe.libchecker.view.detail.LibDetailBottomSheetView
-import com.absinthe.libchecker.view.detail.VF_CONTENT
-import com.absinthe.libchecker.view.detail.VF_LOADING
-import com.absinthe.libchecker.view.detail.VF_NOT_FOUND
 import com.absinthe.libchecker.viewmodel.DetailViewModel
+import com.absinthe.libraries.utils.base.BaseBottomSheetViewDialogFragment
+import com.absinthe.libraries.utils.view.BottomSheetHeaderView
 import com.absinthe.rulesbundle.LCRules
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import timber.log.Timber
 
 const val EXTRA_LIB_NAME = "EXTRA_LIB_NAME"
 const val EXTRA_LIB_TYPE = "EXTRA_LIB_TYPE"
 const val EXTRA_REGEX_NAME = "EXTRA_REGEX_NAME"
+const val EXTRA_IS_VALID_LIB = "EXTRA_IS_VALID_LIB"
 
 class LibDetailDialogFragment : BaseBottomSheetViewDialogFragment<LibDetailBottomSheetView>() {
 
   private val libName by lazy { arguments?.getString(EXTRA_LIB_NAME).orEmpty() }
   private val type by lazy { arguments?.getInt(EXTRA_LIB_TYPE) ?: NATIVE }
   private val regexName by lazy { arguments?.getString(EXTRA_REGEX_NAME) }
+  private val isValidLib by lazy { arguments?.getBoolean(EXTRA_IS_VALID_LIB) ?: true }
   private val viewModel: DetailViewModel by activityViewModels()
   private var isStickyEventReceived = false
 
@@ -37,10 +42,14 @@ class LibDetailDialogFragment : BaseBottomSheetViewDialogFragment<LibDetailBotto
 
   override fun init() {
     root.apply {
-      viewFlipper.displayedChild = VF_LOADING
       title.text = libName
       lifecycleScope.launch {
-        val iconRes = LCRules.getRule(libName, type, true)?.iconRes ?: com.absinthe.lc.rulesbundle.R.drawable.ic_sdk_placeholder
+        val iconRes = if (isValidLib) {
+          LCRules.getRule(libName, type, true)?.iconRes
+            ?: com.absinthe.lc.rulesbundle.R.drawable.ic_sdk_placeholder
+        } else {
+          com.absinthe.lc.rulesbundle.R.drawable.ic_sdk_placeholder
+        }
         icon.load(iconRes) {
           crossfade(true)
           placeholder(R.drawable.ic_logo)
@@ -57,6 +66,10 @@ class LibDetailDialogFragment : BaseBottomSheetViewDialogFragment<LibDetailBotto
 
   override fun onStart() {
     super.onStart()
+    if (!isValidLib) {
+      root.showNotFound()
+      return
+    }
     viewModel.detailBean.observe(viewLifecycleOwner) {
       if (it != null) {
         root.apply {
@@ -75,20 +88,38 @@ class LibDetailDialogFragment : BaseBottomSheetViewDialogFragment<LibDetailBotto
             }
           }
 
-          viewFlipper.displayedChild = VF_CONTENT
+          root.showContent()
+
+          if (it.relativeUrl.startsWith(URLManager.GITHUB) && GlobalValues.isGitHubUnreachable) {
+            lifecycleScope.launch(Dispatchers.IO) {
+              val splits = it.relativeUrl.removePrefix(URLManager.GITHUB).split("/")
+              if (splits.size < 2) {
+                return@launch
+              }
+              val date = viewModel.getRepoUpdatedTime(splits[0], splits[1]) ?: return@launch
+              withContext(Dispatchers.Main) {
+                root.libDetailContentView.setUpdatedTime(date)
+              }
+            }
+          }
         }
       } else {
         if (isStickyEventReceived) {
-          root.viewFlipper.displayedChild = VF_NOT_FOUND
+          root.showNotFound()
         } else {
           isStickyEventReceived = true
         }
       }
     }
-    if (regexName.isNullOrEmpty()) {
-      viewModel.requestLibDetail(libName, type)
-    } else {
-      viewModel.requestLibDetail(regexName!!, type, true)
+    runCatching {
+      if (regexName.isNullOrEmpty()) {
+        viewModel.requestLibDetail(libName, type)
+      } else {
+        viewModel.requestLibDetail(regexName!!, type, true)
+      }
+    }.onFailure {
+      Timber.e(it)
+      context?.showToast(it.message.toString())
     }
   }
 
@@ -113,12 +144,14 @@ class LibDetailDialogFragment : BaseBottomSheetViewDialogFragment<LibDetailBotto
     fun newInstance(
       libName: String,
       @LibType type: Int,
-      regexName: String? = null
+      regexName: String? = null,
+      isValidLib: Boolean = true
     ): LibDetailDialogFragment {
       return LibDetailDialogFragment().putArguments(
         EXTRA_LIB_NAME to libName,
         EXTRA_LIB_TYPE to type,
-        EXTRA_REGEX_NAME to regexName
+        EXTRA_REGEX_NAME to regexName,
+        EXTRA_IS_VALID_LIB to isValidLib
       )
     }
 

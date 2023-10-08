@@ -4,25 +4,25 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.view.ViewGroup
 import android.widget.LinearLayout
+import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.LifecycleCoroutineScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
-import com.absinthe.libchecker.base.BaseActivity
 import com.absinthe.libchecker.recyclerview.BottomSheetRecyclerView
 import com.absinthe.libchecker.recyclerview.adapter.AppAdapter
-import com.absinthe.libchecker.utils.LCAppUtils
 import com.absinthe.libchecker.utils.extensions.addPaddingTop
 import com.absinthe.libchecker.utils.extensions.dp
-import com.absinthe.libchecker.utils.extensions.unsafeLazy
-import com.absinthe.libchecker.view.app.BottomSheetHeaderView
+import com.absinthe.libchecker.utils.extensions.launchDetailPage
 import com.absinthe.libchecker.view.app.IHeaderView
+import com.absinthe.libchecker.view.detail.AndroidVersionLabelView
+import com.absinthe.libraries.utils.view.BottomSheetHeaderView
 import me.zhanghai.android.fastscroll.FastScrollerBuilder
 
 @SuppressLint("ViewConstructor")
 class ClassifyDialogView(context: Context, val lifecycleScope: LifecycleCoroutineScope) :
   LinearLayout(context), IHeaderView {
 
-  val adapter by unsafeLazy { AppAdapter(lifecycleScope) }
+  val adapter = AppAdapter()
 
   private val header = BottomSheetHeaderView(context).apply {
     layoutParams =
@@ -35,7 +35,7 @@ class ClassifyDialogView(context: Context, val lifecycleScope: LifecycleCoroutin
       ViewGroup.LayoutParams.MATCH_PARENT,
       1.0f
     ).also {
-      it.topMargin = 24.dp
+      it.topMargin = 4.dp
     }
     layoutManager = LinearLayoutManager(context)
     adapter = this@ClassifyDialogView.adapter
@@ -53,7 +53,7 @@ class ClassifyDialogView(context: Context, val lifecycleScope: LifecycleCoroutin
     addPaddingTop(16.dp)
     adapter.apply {
       setOnItemClickListener { _, _, position ->
-        LCAppUtils.launchDetailPage(context as BaseActivity<*>, adapter.getItem(position))
+        (context as? FragmentActivity)?.launchDetailPage(adapter.getItem(position))
       }
       setEmptyView(
         LibReferenceLoadingView(context).apply {
@@ -65,12 +65,23 @@ class ClassifyDialogView(context: Context, val lifecycleScope: LifecycleCoroutin
     addView(list)
   }
 
-  override fun getHeaderView(): BottomSheetHeaderView {
-    return header
+  private val androidVersionView = AndroidVersionLabelView(context).apply {
+    layoutParams = LayoutParams(
+      ViewGroup.LayoutParams.MATCH_PARENT,
+      ViewGroup.LayoutParams.WRAP_CONTENT
+    )
+    setPadding(0, 4.dp, 0, 4.dp)
   }
 
-  override fun onDetachedFromWindow() {
-    super.onDetachedFromWindow()
-    adapter.release()
+  fun addAndroidVersionView(triple: Triple<Int, String, Int?>?) {
+    if (androidVersionView.parent == null && triple != null) {
+      androidVersionView.setIcon(triple.third)
+      androidVersionView.text.text = triple.second
+      addView(androidVersionView, 1)
+    }
+  }
+
+  override fun getHeaderView(): BottomSheetHeaderView {
+    return header
   }
 }

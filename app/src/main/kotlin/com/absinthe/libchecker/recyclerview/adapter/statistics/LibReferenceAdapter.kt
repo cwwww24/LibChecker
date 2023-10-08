@@ -1,9 +1,8 @@
 package com.absinthe.libchecker.recyclerview.adapter.statistics
 
-import androidx.lifecycle.LifecycleCoroutineScope
 import com.absinthe.libchecker.annotation.PACKAGE
 import com.absinthe.libchecker.annotation.SHARED_UID
-import com.absinthe.libchecker.bean.LibReference
+import com.absinthe.libchecker.model.LibReference
 import com.absinthe.libchecker.recyclerview.adapter.statistics.provider.LIB_REFERENCE_PROVIDER
 import com.absinthe.libchecker.recyclerview.adapter.statistics.provider.LibReferenceProvider
 import com.absinthe.libchecker.recyclerview.adapter.statistics.provider.MULTIPLE_APPS_ICON_PROVIDER
@@ -11,11 +10,11 @@ import com.absinthe.libchecker.recyclerview.adapter.statistics.provider.Multiple
 import com.chad.library.adapter.base.BaseNodeAdapter
 import com.chad.library.adapter.base.entity.node.BaseNode
 
-class LibReferenceAdapter(val lifecycleScope: LifecycleCoroutineScope) : BaseNodeAdapter() {
+class LibReferenceAdapter : BaseNodeAdapter() {
 
   init {
-    addNodeProvider(LibReferenceProvider(lifecycleScope))
-    addNodeProvider(MultipleAppsIconProvider(lifecycleScope))
+    addNodeProvider(LibReferenceProvider())
+    addNodeProvider(MultipleAppsIconProvider())
   }
 
   override fun getItemType(data: List<BaseNode>, position: Int): Int {
@@ -27,6 +26,6 @@ class LibReferenceAdapter(val lifecycleScope: LifecycleCoroutineScope) : BaseNod
   }
 
   companion object {
-    var highlightText: String = ""
+    var highlightText: String = String()
   }
 }

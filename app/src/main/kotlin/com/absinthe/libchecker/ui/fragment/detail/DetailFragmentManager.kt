@@ -1,10 +1,12 @@
 package com.absinthe.libchecker.ui.fragment.detail
 
 import android.util.SparseArray
+import androidx.core.util.forEach
 import androidx.core.util.valueIterator
 import com.absinthe.libchecker.annotation.LibType
 import com.absinthe.libchecker.constant.GlobalValues
 import com.absinthe.libchecker.ui.fragment.BaseDetailFragment
+import com.absinthe.libchecker.ui.fragment.BaseFilterAnalysisFragment
 
 const val MODE_SORT_BY_SIZE = 0
 const val MODE_SORT_BY_LIB = 1
@@ -40,12 +42,21 @@ class DetailFragmentManager {
     }
   }
 
-  fun deliverFilter(text: String) {
-    val iterator = map.valueIterator()
-    var entry: BaseDetailFragment<*>
-    while (iterator.hasNext()) {
-      entry = iterator.next()
-      entry.filterList(text)
+  fun deliverFilterItemsByText(text: String) {
+    map.forEach { _, value ->
+      value.filterList(text)
+    }
+  }
+
+  fun deliverSwitchProcessMode() {
+    map.forEach { _, value ->
+      value.switchProcessMode()
+    }
+  }
+
+  fun deliverFilterItems(condition: String?) {
+    map.forEach { _, value ->
+      (value as? BaseFilterAnalysisFragment)?.filterItems(condition)
     }
   }
 

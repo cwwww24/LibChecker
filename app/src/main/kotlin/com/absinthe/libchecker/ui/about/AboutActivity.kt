@@ -3,12 +3,11 @@ package com.absinthe.libchecker.ui.about
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.res.Configuration
-import android.graphics.BitmapFactory
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.TransitionDrawable
-import android.media.MediaPlayer
 import android.os.Bundle
 import android.view.Menu
+import android.view.MenuInflater
 import android.view.MenuItem
 import android.widget.ImageView
 import android.widget.LinearLayout
@@ -17,10 +16,13 @@ import androidx.annotation.StringRes
 import androidx.appcompat.widget.Toolbar
 import androidx.core.net.toUri
 import androidx.core.text.HtmlCompat
+import androidx.core.view.MenuProvider
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import coil.load
 import com.absinthe.libchecker.BuildConfig
 import com.absinthe.libchecker.R
+import com.absinthe.libchecker.about.Renge
 import com.absinthe.libchecker.constant.Constants
 import com.absinthe.libchecker.constant.GlobalValues
 import com.absinthe.libchecker.constant.URLManager
@@ -28,13 +30,13 @@ import com.absinthe.libchecker.utils.PackageUtils
 import com.absinthe.libchecker.utils.extensions.getColor
 import com.absinthe.libchecker.utils.showLongToast
 import com.absinthe.libraries.me.Absinthe
-import com.drakeet.about.AbsAboutActivity
 import com.drakeet.about.Card
 import com.drakeet.about.Category
 import com.drakeet.about.Contributor
 import com.drakeet.about.License
 import com.microsoft.appcenter.analytics.Analytics
 import com.microsoft.appcenter.analytics.EventProperties
+import java.lang.ref.WeakReference
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -42,7 +44,7 @@ import timber.log.Timber
 
 private const val RENGE_CHECKER = "RengeChecker"
 
-class AboutActivity : AbsAboutActivity() {
+class AboutActivity : AbsAboutActivityProxy(), MenuProvider {
 
   private var shouldShowEasterEggCount = 1
   private val configuration by lazy {
@@ -52,7 +54,7 @@ class AboutActivity : AbsAboutActivity() {
       )
     }
   }
-  private val mediaPlayer by lazy { MediaPlayer() }
+  private val renge by lazy { Renge(WeakReference(this)) }
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
@@ -66,14 +68,18 @@ class AboutActivity : AbsAboutActivity() {
   override fun onDestroy() {
     super.onDestroy()
     if (shouldShowEasterEggCount == 20) {
-      mediaPlayer.release()
+      renge.sayonara()
     }
   }
 
   override fun onCreateHeader(icon: ImageView, slogan: TextView, version: TextView) {
     icon.load(R.drawable.pic_logo)
     slogan.setText(R.string.app_name)
-    version.text = String.format("Version: %s", BuildConfig.VERSION_NAME)
+    if (GlobalValues.debugMode) {
+      version.text = String.format("Build Time: %s", BuildConfig.BUILD_TIME)
+    } else {
+      version.text = String.format("Version: %s", BuildConfig.VERSION_NAME)
+    }
 
     val rebornCoroutine = lifecycleScope.launch(Dispatchers.Default) {
       delay(300)
@@ -86,6 +92,7 @@ class AboutActivity : AbsAboutActivity() {
           shouldShowEasterEggCount++
           rebornCoroutine.start()
         }
+
         10 -> {
           slogan.text = RENGE_CHECKER
           rebornCoroutine.cancel()
@@ -95,17 +102,20 @@ class AboutActivity : AbsAboutActivity() {
             EventProperties().set("EASTER_EGG", "Renge 10 hits")
           )
         }
+
         in 11..19 -> {
           rebornCoroutine.cancel()
           shouldShowEasterEggCount++
           rebornCoroutine.start()
         }
+
         20 -> {
           rebornCoroutine.cancel()
           shouldShowEasterEggCount++
 
-          val inputStream = assets.open("renge.webp")
-          icon.setImageBitmap(BitmapFactory.decodeStream(inputStream))
+          renge.renge?.let {
+            icon.setImageBitmap(it)
+          }
           slogan.text = "ええ、私もよ。"
           val headerContentLayout =
             findViewById<LinearLayout>(com.drakeet.about.R.id.header_content_layout)
@@ -120,12 +130,7 @@ class AboutActivity : AbsAboutActivity() {
           window.statusBarColor = R.color.renge.getColor(this)
           drawable.startTransition(250)
 
-          val fd = assets.openFd("renge_no_koe.aac")
-          mediaPlayer.also {
-            it.setDataSource(fd.fileDescriptor, fd.startOffset, fd.length)
-            it.prepare()
-            it.start()
-          }
+          renge.inori()
           GlobalValues.rengeTheme = !GlobalValues.rengeTheme
           Analytics.trackEvent(
             Constants.Event.EASTER_EGG,
@@ -137,8 +142,7 @@ class AboutActivity : AbsAboutActivity() {
   }
 
   override fun onItemsCreated(items: MutableList<Any>) {
-
-    val hasInstallCoolApk = PackageUtils.isAppInstalled(Constants.PACKAGE_NAME_COOLAPK)
+    val hasInstallCoolApk = PackageUtils.isAppInstalled(Constants.PackageNames.COOLAPK)
 
     items.apply {
       add(Category("What's this"))
@@ -150,8 +154,30 @@ class AboutActivity : AbsAboutActivity() {
       } else {
         URLManager.GITHUB_PAGE
       }
-      add(Contributor(R.drawable.pic_rabbit, Absinthe.ME, "Developer & Designer", developerUrl))
-      add(Contributor(R.drawable.pic_kali, "Goooler", "Code Tidy & Optimize", "https://github.com/Goooler"))
+      add(
+        Contributor(
+          R.drawable.pic_rabbit,
+          Absinthe.ME,
+          "Developer & Designer",
+          developerUrl
+        )
+      )
+      add(
+        Contributor(
+          R.drawable.pic_kali,
+          "Goooler",
+          "Code Tidy & Optimize",
+          "https://github.com/Goooler"
+        )
+      )
+      add(
+        Contributor(
+          R.drawable.pic_qhy040404,
+          "qhy040404",
+          "Developer",
+          "https://github.com/qhy040404"
+        )
+      )
       add(
         Contributor(
           R.drawable.ic_github,
@@ -170,23 +196,56 @@ class AboutActivity : AbsAboutActivity() {
       )
 
       add(Category("Contribution"))
+      val contributors = StringBuilder()
+      contributors.append("Russian & Ukrainian Translation: ")
+        .append("<b>")
+        .append("tommynok")
+        .append("</b>")
+        .append("[")
+        .append(getHyperLink("https://t.me/tommynok"))
+        .append("]")
+        .append("<br>")
+      contributors.append("Harmony OS detection methods: ")
+        .append("<b>")
+        .append("su1216")
+        .append("</b>")
+        .append("[")
+        .append(getHyperLink("https://t.me/dear_su1216"))
+        .append("]")
+        .append("<br>")
+      contributors.append("Bug Reporter: ")
+        .append("<b>")
+        .append("LiuXing")
+        .append("</b>")
+        .append("[")
+        .append(getHyperLink("https://www.coolapk.com/u/1382006"))
+        .append("]")
+        .append("<br>")
+      contributors.append("Bug Reporter: ")
+        .append("<b>")
+        .append("Flyzc")
+        .append("</b>")
+        .append("[")
+        .append(getHyperLink("https://t.me/Flyzc"))
+        .append("]")
       add(
-        Contributor(
-          0/*TODO*/,
-          "Telegram @tommynok",
-          "Russian & Ukrainian Translation",
-          "https://t.me/tommynok"
+        Card(
+          HtmlCompat.fromHtml(
+            contributors.toString(),
+            HtmlCompat.FROM_HTML_MODE_LEGACY
+          )
         )
       )
 
       val list = listOf(
         "https://www.iconfont.cn/",
         "https://lottiefiles.com/22122-fanimation",
+        "https://lottiefiles.com/77311-sweet-teapot-with-autumn-herbs-and-birds",
+        "https://lottiefiles.com/51686-a-botanical-wreath-loading",
         "https://lottiefiles.com/21836-blast-off",
         "https://lottiefiles.com/1309-smiley-stack",
         "https://lottiefiles.com/44836-gray-down-arrow",
-        "https://lottiefiles.com/66818-holographic-radar",
-        "https://chojugiga.com/2017/09/05/da4choju53_0031/"
+        "https://lottiefiles.com/66818-holographic-radar"
       )
       add(Category("Acknowledgement"))
       add(
@@ -201,7 +260,18 @@ class AboutActivity : AbsAboutActivity() {
       add(Category("Declaration"))
       add(Card(getStringByConfiguration(R.string.library_declaration)))
 
+      add(Category("Privacy Policy"))
+      add(Card("https://absinthe.life/LibChecker-Docs/guide/PRIVACY/"))
+
       add(Category("Open Source Licenses"))
+      add(
+        License(
+          "LibChecker-Rules-Bundle",
+          "LibChecker",
+          License.APACHE_2,
+          "https://github.com/LibChecker/LibChecker-Rules-Bundle"
+        )
+      )
       add(
         License(
           "kotlin",
@@ -378,15 +448,30 @@ class AboutActivity : AbsAboutActivity() {
           "https://github.com/LSPosed/AndroidHiddenApiBypass"
         )
       )
+      add(
+        License(
+          "cascade",
+          "saket",
+          License.APACHE_2,
+          "https://github.com/saket/cascade"
+        )
+      )
+      add(
+        License(
+          "Android-Room-Database-Backup",
+          "rafi0101",
+          License.MIT,
+          "https://github.com/rafi0101/Android-Room-Database-Backup"
+        )
+      )
     }
   }
 
-  override fun onCreateOptionsMenu(menu: Menu): Boolean {
+  override fun onCreateMenu(menu: Menu, menuInflater: MenuInflater) {
     menuInflater.inflate(R.menu.about_menu, menu)
-    return true
   }
 
-  override fun onOptionsItemSelected(menuItem: MenuItem): Boolean {
+  override fun onMenuItemSelected(menuItem: MenuItem): Boolean {
     if (menuItem.itemId == R.id.toolbar_rate) {
       try {
         startActivity(
@@ -399,11 +484,14 @@ class AboutActivity : AbsAboutActivity() {
         showLongToast(R.string.toast_not_existing_market)
       }
     }
-    return super.onOptionsItemSelected(menuItem)
+    return true
   }
 
   private fun initView() {
-    findViewById<Toolbar>(R.id.toolbar)?.background = null
+    addMenuProvider(this, this, Lifecycle.State.STARTED)
+    findViewById<Toolbar>(R.id.toolbar)?.let {
+      it.title = getString(R.string.settings_about)
+    }
     val color = getColor(R.color.aboutHeader)
     setHeaderBackground(ColorDrawable(color))
     setHeaderContentScrim(ColorDrawable(color))
@@ -411,11 +499,14 @@ class AboutActivity : AbsAboutActivity() {
 
   private fun getAcknowledgementHtmlString(list: List<String>): String {
     val sb = StringBuilder()
-    val formatItem = "<a href=\"%s\">%s</a><br>"
 
     sb.append(getStringByConfiguration(R.string.resource_declaration)).append("<br>")
-    list.forEach { sb.append(String.format(formatItem, it, it)) }
+    list.forEach { sb.append(getHyperLink(it)).append("<br>") }
     return sb.toString()
+  }
+
+  private fun getHyperLink(url: String): String {
+    return String.format("<a href=\"%s\">%s</a>", url, url)
   }
 
   private fun getStringByConfiguration(@StringRes res: Int): String =

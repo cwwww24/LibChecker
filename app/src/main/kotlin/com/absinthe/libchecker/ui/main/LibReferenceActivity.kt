@@ -12,17 +12,19 @@ import com.absinthe.libchecker.annotation.NATIVE
 import com.absinthe.libchecker.annotation.SPRING
 import com.absinthe.libchecker.annotation.SUMMER
 import com.absinthe.libchecker.annotation.WINTER
-import com.absinthe.libchecker.base.BaseActivity
 import com.absinthe.libchecker.constant.GlobalValues
 import com.absinthe.libchecker.databinding.ActivityLibReferenceBinding
 import com.absinthe.libchecker.recyclerview.adapter.AppAdapter
+import com.absinthe.libchecker.ui.base.BaseActivity
 import com.absinthe.libchecker.utils.LCAppUtils
 import com.absinthe.libchecker.utils.extensions.isOrientationLandscape
+import com.absinthe.libchecker.utils.extensions.launchDetailPage
 import com.absinthe.libchecker.utils.extensions.paddingTopCompat
-import com.absinthe.libchecker.utils.extensions.unsafeLazy
 import com.absinthe.libchecker.viewmodel.LibReferenceViewModel
 import com.absinthe.libraries.utils.utils.AntiShakeUtils
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import me.zhanghai.android.fastscroll.FastScrollerBuilder
 import rikka.widget.borderview.BorderView
 
@@ -32,7 +34,7 @@ const val EXTRA_REF_LIST = "REF_LIST"
 
 class LibReferenceActivity : BaseActivity<ActivityLibReferenceBinding>() {
 
-  private val adapter by unsafeLazy { AppAdapter(lifecycleScope) }
+  private val adapter = AppAdapter()
   private val viewModel: LibReferenceViewModel by viewModels()
   private val refName by lazy { intent.extras?.getString(EXTRA_REF_NAME) }
   private val refType by lazy { intent.extras?.getInt(EXTRA_REF_TYPE) ?: NATIVE }
@@ -43,25 +45,28 @@ class LibReferenceActivity : BaseActivity<ActivityLibReferenceBinding>() {
 
     refName?.let { name ->
       initView()
-      viewModel.dbItems.observe(this) {
-        refList?.let {
-          viewModel.setData(it.toList())
-        } ?: run {
-          viewModel.setData(name, refType)
-        }
-      }
-
       lifecycleScope.launch {
-        LCAppUtils.getRuleWithRegex(name, refType)?.let {
-          binding.toolbar.title = it.label
+        viewModel.dbItemsFlow.collect {
+          refList?.let {
+            viewModel.setData(it.toList())
+          } ?: run {
+            viewModel.setData(name, refType)
+          }
+        }
+
+        withContext(Dispatchers.IO) {
+          LCAppUtils.getRuleWithRegex(name, refType)?.let {
+            withContext(Dispatchers.Main) {
+              binding.toolbar.title = it.label
+            }
+          } ?: run {
+            withContext(Dispatchers.Main) {
+              binding.toolbar.title = getString(R.string.tab_lib_reference_statistics)
+            }
+          }
         }
       }
     } ?: finish()
-  }
-
-  override fun onDestroy() {
-    super.onDestroy()
-    adapter.release()
   }
 
   override fun onOptionsItemSelected(item: MenuItem): Boolean {
@@ -74,19 +79,19 @@ class LibReferenceActivity : BaseActivity<ActivityLibReferenceBinding>() {
   override fun onConfigurationChanged(newConfig: Configuration) {
     super.onConfigurationChanged(newConfig)
     binding.root.apply {
-      fitsSystemWindows = isOrientationLandscape
+      fitsSystemWindows = newConfig.isOrientationLandscape
       paddingTopCompat = 0
     }
   }
 
   private fun initView() {
+    setSupportActionBar(binding.toolbar)
     binding.apply {
       root.apply {
         fitsSystemWindows = isOrientationLandscape
         paddingTopCompat = 0
       }
 
-      setAppBar(appbar, toolbar)
       supportActionBar?.setDisplayHomeAsUpEnabled(true)
       (root as ViewGroup).bringChildToFront(appbar)
 
@@ -94,7 +99,7 @@ class LibReferenceActivity : BaseActivity<ActivityLibReferenceBinding>() {
         adapter = this@LibReferenceActivity.adapter
         borderVisibilityChangedListener =
           BorderView.OnBorderVisibilityChangedListener { top: Boolean, _: Boolean, _: Boolean, _: Boolean ->
-            appBar?.setRaised(!top)
+            binding.appbar.isLifted = !top
           }
         setHasFixedSize(true)
         FastScrollerBuilder(this).useMd2Style().build()
@@ -115,11 +120,11 @@ class LibReferenceActivity : BaseActivity<ActivityLibReferenceBinding>() {
         imageAssetsFolder = "/"
 
         val assetName = when (GlobalValues.season) {
-          SPRING -> "anim/lib_reference_spring.json"
-          SUMMER -> "anim/lib_reference_summer.json"
-          AUTUMN -> "anim/lib_reference_autumn.json"
-          WINTER -> "anim/lib_reference_winter.json"
-          else -> "anim/lib_reference_summer.json"
+          SPRING -> "anim/lib_reference_spring.json.zip"
+          SUMMER -> "anim/lib_reference_summer.json.zip"
+          AUTUMN -> "anim/lib_reference_autumn.json.zip"
+          WINTER -> "anim/lib_reference_winter.json.zip"
+          else -> "anim/lib_reference_summer.json.zip"
         }
 
         setAnimation(assetName)
@@ -135,8 +140,7 @@ class LibReferenceActivity : BaseActivity<ActivityLibReferenceBinding>() {
       if (AntiShakeUtils.isInvalidClick(view)) {
         return@setOnItemClickListener
       }
-      LCAppUtils.launchDetailPage(
-        this,
+      launchDetailPage(
         item = adapter.getItem(position),
         refName = refName,
         refType = refType

@@ -5,41 +5,47 @@ import android.content.ComponentName
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.os.RemoteException
 import android.text.TextUtils
 import android.view.LayoutInflater
 import android.view.ViewGroup
 import android.widget.FrameLayout
+import androidx.appcompat.app.AppCompatDelegate
 import androidx.browser.customtabs.CustomTabsIntent
 import androidx.core.net.toUri
 import androidx.core.text.HtmlCompat
 import androidx.fragment.app.activityViewModels
+import androidx.preference.ListPreference
 import androidx.preference.Preference
 import androidx.preference.PreferenceFragmentCompat
-import androidx.preference.SwitchPreference
+import androidx.preference.TwoStatePreference
 import androidx.recyclerview.widget.RecyclerView
 import com.absinthe.libchecker.BuildConfig
 import com.absinthe.libchecker.R
-import com.absinthe.libchecker.SystemServices
-import com.absinthe.libchecker.base.BaseAlertDialogBuilder
+import com.absinthe.libchecker.app.SystemServices
 import com.absinthe.libchecker.constant.Constants
 import com.absinthe.libchecker.constant.GlobalValues
 import com.absinthe.libchecker.constant.URLManager
 import com.absinthe.libchecker.ui.about.AboutActivity
+import com.absinthe.libchecker.ui.base.BaseAlertDialogBuilder
 import com.absinthe.libchecker.ui.detail.ApkDetailActivity
+import com.absinthe.libchecker.ui.fragment.IAppBarContainer
 import com.absinthe.libchecker.ui.fragment.IListController
-import com.absinthe.libchecker.ui.main.MainActivity
 import com.absinthe.libchecker.utils.LCAppUtils
-import com.absinthe.libchecker.utils.PackageUtils
+import com.absinthe.libchecker.utils.Toasty
+import com.absinthe.libchecker.utils.UiUtils
 import com.absinthe.libchecker.utils.extensions.addPaddingTop
+import com.absinthe.libchecker.utils.extensions.doOnMainThreadIdle
+import com.absinthe.libchecker.utils.extensions.setBottomPaddingSpace
 import com.absinthe.libchecker.viewmodel.HomeViewModel
+import com.absinthe.libraries.utils.extensions.getBoolean
+import com.absinthe.libraries.utils.manager.SystemBarManager
 import com.absinthe.libraries.utils.utils.AntiShakeUtils
-import com.absinthe.libraries.utils.utils.UiUtils
 import com.absinthe.rulesbundle.LCRemoteRepo
 import com.absinthe.rulesbundle.LCRules
 import com.microsoft.appcenter.analytics.Analytics
 import com.microsoft.appcenter.analytics.EventProperties
-import rikka.material.app.AppBar
-import rikka.material.app.DayNightDelegate
+import java.util.Locale
 import rikka.material.app.LocaleDelegate
 import rikka.preference.SimpleMenuPreference
 import rikka.recyclerview.fixEdgeEffect
@@ -47,7 +53,6 @@ import rikka.widget.borderview.BorderRecyclerView
 import rikka.widget.borderview.BorderView
 import rikka.widget.borderview.BorderViewDelegate
 import timber.log.Timber
-import java.util.Locale
 
 class SettingsFragment : PreferenceFragmentCompat(), IListController {
 
@@ -55,16 +60,10 @@ class SettingsFragment : PreferenceFragmentCompat(), IListController {
   private lateinit var prefRecyclerView: RecyclerView
   private val viewModel: HomeViewModel by activityViewModels()
 
-  companion object {
-    init {
-      SimpleMenuPreference.setLightFixEnabled(true)
-    }
-  }
-
   override fun onCreatePreferences(savedInstanceState: Bundle?, rootKey: String?) {
-    setPreferencesFromResource(R.xml.settings, rootKey)
+    setPreferencesFromResource(R.xml.settings, null)
 
-    (findPreference<SwitchPreference>(Constants.PREF_SHOW_SYSTEM_APPS))?.apply {
+    findPreference<TwoStatePreference>(Constants.PREF_SHOW_SYSTEM_APPS)?.apply {
       setOnPreferenceChangeListener { _, newValue ->
         GlobalValues.isShowSystemApps.value = newValue as Boolean
         Analytics.trackEvent(
@@ -74,7 +73,7 @@ class SettingsFragment : PreferenceFragmentCompat(), IListController {
         true
       }
     }
-    (findPreference<SwitchPreference>(Constants.PREF_APK_ANALYTICS))?.apply {
+    findPreference<TwoStatePreference>(Constants.PREF_APK_ANALYTICS)?.apply {
       setOnPreferenceChangeListener { _, newValue ->
         val flag = if (newValue as Boolean) {
           PackageManager.COMPONENT_ENABLED_STATE_ENABLED
@@ -82,10 +81,16 @@ class SettingsFragment : PreferenceFragmentCompat(), IListController {
           PackageManager.COMPONENT_ENABLED_STATE_DISABLED
         }
 
-        SystemServices.packageManager.setComponentEnabledSetting(
-          ComponentName(BuildConfig.APPLICATION_ID, ApkDetailActivity::class.java.name),
-          flag, PackageManager.DONT_KILL_APP
-        )
+        try {
+          SystemServices.packageManager.setComponentEnabledSetting(
+            ComponentName(BuildConfig.APPLICATION_ID, ApkDetailActivity::class.java.name),
+            flag,
+            PackageManager.DONT_KILL_APP
+          )
+        } catch (e: RemoteException) {
+          Timber.e(e)
+          Toasty.showShort(requireContext(), e.toString())
+        }
         Analytics.trackEvent(
           Constants.Event.SETTINGS,
           EventProperties().set("PREF_APK_ANALYTICS", newValue)
@@ -93,10 +98,9 @@ class SettingsFragment : PreferenceFragmentCompat(), IListController {
         true
       }
     }
-    (findPreference<SwitchPreference>(Constants.PREF_COLORFUL_ICON))?.apply {
+    findPreference<TwoStatePreference>(Constants.PREF_COLORFUL_ICON)?.apply {
       setOnPreferenceChangeListener { _, newValue ->
         GlobalValues.isColorfulIcon.value = newValue as Boolean
-        activity?.recreate()
         Analytics.trackEvent(
           Constants.Event.SETTINGS,
           EventProperties().set("PREF_COLORFUL_ICON", newValue)
@@ -104,25 +108,14 @@ class SettingsFragment : PreferenceFragmentCompat(), IListController {
         true
       }
     }
-    (findPreference<SwitchPreference>(Constants.PREF_MD3))?.apply {
-      setOnPreferenceChangeListener { _, newValue ->
-        GlobalValues.md3Theme = newValue as Boolean
-        activity?.recreate()
-        Analytics.trackEvent(
-          Constants.Event.SETTINGS,
-          EventProperties().set("PREF_MD3", newValue)
-        )
-        true
-      }
-    }
-    (findPreference<SimpleMenuPreference>(Constants.PREF_RULES_REPO))?.apply {
+    findPreference<SimpleMenuPreference>(Constants.PREF_RULES_REPO)?.apply {
       setOnPreferenceChangeListener { _, newValue ->
         GlobalValues.repo = newValue as String
         LCRules.setRemoteRepo(
           if (GlobalValues.repo == Constants.REPO_GITHUB) {
             LCRemoteRepo.Github
           } else {
-            LCRemoteRepo.Gitee
+            LCRemoteRepo.Gitlab
           }
         )
         Analytics.trackEvent(
@@ -133,7 +126,7 @@ class SettingsFragment : PreferenceFragmentCompat(), IListController {
       }
     }
     val languagePreference =
-      (findPreference<SimpleMenuPreference>(Constants.PREF_LOCALE))?.apply {
+      findPreference<ListPreference>(Constants.PREF_LOCALE)?.apply {
         setOnPreferenceChangeListener { _, newValue ->
           if (newValue is String) {
             val locale: Locale = if ("SYSTEM" == newValue) {
@@ -148,10 +141,16 @@ class SettingsFragment : PreferenceFragmentCompat(), IListController {
           true
         }
       }!!
+    findPreference<SimpleMenuPreference>(Constants.PREF_SNAPSHOT_KEEP)?.apply {
+      setOnPreferenceChangeListener { _, newValue ->
+        GlobalValues.snapshotKeep = newValue.toString()
+        true
+      }
+    }
     findPreference<SimpleMenuPreference>(Constants.PREF_DARK_MODE)?.apply {
       setOnPreferenceChangeListener { _, newValue ->
         GlobalValues.darkMode = newValue.toString()
-        DayNightDelegate.setDefaultNightMode(LCAppUtils.getNightMode(newValue.toString()))
+        AppCompatDelegate.setDefaultNightMode(UiUtils.getNightMode())
         activity?.recreate()
         true
       }
@@ -161,7 +160,10 @@ class SettingsFragment : PreferenceFragmentCompat(), IListController {
         if (AntiShakeUtils.isInvalidClick(prefRecyclerView)) {
           false
         } else {
-          CloudRulesDialogFragment().show(childFragmentManager, tag)
+          CloudRulesDialogFragment().show(
+            childFragmentManager,
+            CloudRulesDialogFragment::class.java.name
+          )
           true
         }
       }
@@ -171,7 +173,10 @@ class SettingsFragment : PreferenceFragmentCompat(), IListController {
         if (AntiShakeUtils.isInvalidClick(prefRecyclerView)) {
           false
         } else {
-          LibThresholdDialogFragment().show(requireActivity().supportFragmentManager, tag)
+          LibThresholdDialogFragment().show(
+            requireActivity().supportFragmentManager,
+            LibThresholdDialogFragment::class.java.name
+          )
           true
         }
       }
@@ -206,20 +211,41 @@ class SettingsFragment : PreferenceFragmentCompat(), IListController {
         true
       }
     }
+    findPreference<Preference>(Constants.PREF_TRANSLATION)?.apply {
+      setOnPreferenceClickListener {
+        runCatching {
+          CustomTabsIntent.Builder().build().apply {
+            launchUrl(requireActivity(), URLManager.CROWDIN_PAGE.toUri())
+          }
+        }.onFailure {
+          Timber.e(it)
+          runCatching {
+            val intent = Intent(Intent.ACTION_VIEW)
+              .setData(URLManager.CROWDIN_PAGE.toUri())
+            requireActivity().startActivity(intent)
+          }.onFailure { inner ->
+            Timber.e(inner)
+            Toasty.showShort(requireActivity(), "No browser application")
+          }
+        }
+        true
+      }
+    }
     findPreference<Preference>(Constants.PREF_HELP)?.apply {
       setOnPreferenceClickListener {
-        try {
+        runCatching {
           CustomTabsIntent.Builder().build().apply {
             launchUrl(requireActivity(), URLManager.DOCS_PAGE.toUri())
           }
-        } catch (e: ActivityNotFoundException) {
-          Timber.e(e)
-          try {
+        }.onFailure {
+          Timber.e(it)
+          runCatching {
             val intent = Intent(Intent.ACTION_VIEW)
               .setData(URLManager.DOCS_PAGE.toUri())
             requireActivity().startActivity(intent)
-          } catch (e: ActivityNotFoundException) {
-            Timber.e(e)
+          }.onFailure { inner ->
+            Timber.e(inner)
+            Toasty.showShort(requireActivity(), "No browser application")
           }
         }
         true
@@ -227,15 +253,8 @@ class SettingsFragment : PreferenceFragmentCompat(), IListController {
     }
     findPreference<Preference>(Constants.PREF_RATE)?.apply {
       setOnPreferenceClickListener {
-        val hasInstallCoolApk = PackageUtils.isAppInstalled(Constants.PACKAGE_NAME_COOLAPK)
-        val marketUrl = if (hasInstallCoolApk) {
-          URLManager.COOLAPK_APP_PAGE
-        } else {
-          URLManager.MARKET_PAGE
-        }
-
         try {
-          startActivity(Intent.parseUri(marketUrl, 0))
+          LCAppUtils.launchMarketPage(requireContext(), BuildConfig.APPLICATION_ID)
           Analytics.trackEvent(
             Constants.Event.SETTINGS,
             EventProperties().set("PREF_RATE", "Clicked")
@@ -259,7 +278,8 @@ class SettingsFragment : PreferenceFragmentCompat(), IListController {
         true
       }
     }
-    (findPreference<SwitchPreference>(Constants.PREF_ANONYMOUS_ANALYTICS))?.apply {
+    findPreference<TwoStatePreference>(Constants.PREF_ANONYMOUS_ANALYTICS)?.apply {
+      isVisible = getBoolean(R.bool.is_foss).not()
       setOnPreferenceChangeListener { _, newValue ->
         GlobalValues.isAnonymousAnalyticsEnabled.value = newValue as Boolean
         true
@@ -274,14 +294,18 @@ class SettingsFragment : PreferenceFragmentCompat(), IListController {
     for (i in 1 until languagePreference.entries.size) {
       val locale = Locale.forLanguageTag(languagePreference.entries[i].toString())
       localeName.add(
-        if (!TextUtils.isEmpty(locale.script)) locale.getDisplayScript(locale) else locale.getDisplayName(
-          locale
-        )
+        if (!TextUtils.isEmpty(locale.script)) {
+          locale.getDisplayScript(locale)
+        } else {
+          locale.getDisplayName(locale)
+        }
       )
       localeNameUser.add(
-        if (!TextUtils.isEmpty(locale.script)) locale.getDisplayScript(
-          userLocale
-        ) else locale.getDisplayName(userLocale)
+        if (!TextUtils.isEmpty(locale.script)) {
+          locale.getDisplayScript(userLocale)
+        } else {
+          locale.getDisplayName(userLocale)
+        }
       )
     }
 
@@ -310,11 +334,16 @@ class SettingsFragment : PreferenceFragmentCompat(), IListController {
 
   override fun onResume() {
     super.onResume()
+    val container = (activity as? IAppBarContainer) ?: return
     if (this != viewModel.controller) {
       viewModel.controller = this
-      requireActivity().invalidateOptionsMenu()
+      container.currentMenuProvider?.let { current ->
+        activity?.removeMenuProvider(current)
+      }
+      container.currentMenuProvider = null
     }
-    scheduleAppbarRaisingStatus()
+    scheduleAppbarRaisingStatus(!getBorderViewDelegate().isShowingTopBorder)
+    container.setLiftOnScrollTargetView(prefRecyclerView)
   }
 
   override fun onCreateRecyclerView(
@@ -324,10 +353,15 @@ class SettingsFragment : PreferenceFragmentCompat(), IListController {
   ): RecyclerView {
     val recyclerView =
       super.onCreateRecyclerView(inflater, parent, savedInstanceState) as BorderRecyclerView
+    recyclerView.id = android.R.id.list
     recyclerView.fixEdgeEffect()
-    recyclerView.addPaddingTop(UiUtils.getStatusBarHeight())
+    recyclerView.addPaddingTop(SystemBarManager.statusBarSize)
     recyclerView.overScrollMode = RecyclerView.OVER_SCROLL_NEVER
     recyclerView.isVerticalScrollBarEnabled = false
+
+    doOnMainThreadIdle {
+      recyclerView.setBottomPaddingSpace()
+    }
 
     val lp = recyclerView.layoutParams
     if (lp is FrameLayout.LayoutParams) {
@@ -340,11 +374,15 @@ class SettingsFragment : PreferenceFragmentCompat(), IListController {
     borderViewDelegate = recyclerView.borderViewDelegate
     borderViewDelegate.borderVisibilityChangedListener =
       BorderView.OnBorderVisibilityChangedListener { top: Boolean, _: Boolean, _: Boolean, _: Boolean ->
-        (activity as MainActivity?)?.appBar?.setRaised(!top)
+        scheduleAppbarRaisingStatus(!top)
       }
 
     prefRecyclerView = recyclerView
     return recyclerView
+  }
+
+  private fun scheduleAppbarRaisingStatus(isLifted: Boolean) {
+    (activity as? IAppBarContainer)?.scheduleAppbarLiftingStatus(isLifted)
   }
 
   override fun onDetach() {
@@ -358,14 +396,7 @@ class SettingsFragment : PreferenceFragmentCompat(), IListController {
     // Do nothing
   }
 
-  override fun getAppBar(): AppBar? = (activity as MainActivity?)?.appBar
-
   override fun getBorderViewDelegate(): BorderViewDelegate = borderViewDelegate
-
-  override fun scheduleAppbarRaisingStatus() {
-    getAppBar()?.setRaised(!getBorderViewDelegate().isShowingTopBorder)
-  }
-
   override fun isAllowRefreshing(): Boolean = true
   override fun getSuitableLayoutManager(): RecyclerView.LayoutManager? = null
 }

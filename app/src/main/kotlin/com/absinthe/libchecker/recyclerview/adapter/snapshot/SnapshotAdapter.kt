@@ -1,50 +1,51 @@
 package com.absinthe.libchecker.recyclerview.adapter.snapshot
 
-import android.annotation.SuppressLint
-import android.content.pm.PackageManager
-import android.graphics.Color
 import android.text.Spannable
 import android.text.SpannableString
 import android.text.SpannableStringBuilder
 import android.text.style.ImageSpan
-import android.view.ContextThemeWrapper
 import android.view.ViewGroup
+import androidx.core.text.buildSpannedString
+import androidx.core.text.inSpans
 import androidx.core.view.isGone
 import androidx.core.view.isVisible
-import androidx.lifecycle.LifecycleCoroutineScope
+import coil.load
 import com.absinthe.libchecker.R
-import com.absinthe.libchecker.bean.SnapshotDiffItem
+import com.absinthe.libchecker.constant.AdvancedOptions
 import com.absinthe.libchecker.constant.Constants
-import com.absinthe.libchecker.utils.AppIconCache
+import com.absinthe.libchecker.constant.GlobalValues
+import com.absinthe.libchecker.constant.SnapshotOptions
+import com.absinthe.libchecker.model.SnapshotDiffItem
+import com.absinthe.libchecker.recyclerview.adapter.HighlightAdapter
+import com.absinthe.libchecker.utils.DateUtils
+import com.absinthe.libchecker.utils.LCAppUtils
 import com.absinthe.libchecker.utils.PackageUtils
+import com.absinthe.libchecker.utils.extensions.PREINSTALLED_TIMESTAMP
 import com.absinthe.libchecker.utils.extensions.getColorByAttr
 import com.absinthe.libchecker.utils.extensions.getDrawable
+import com.absinthe.libchecker.utils.extensions.setAlphaForAll
 import com.absinthe.libchecker.utils.extensions.sizeToString
-import com.absinthe.libchecker.utils.extensions.toColorStateList
+import com.absinthe.libchecker.utils.extensions.unsafeLazy
 import com.absinthe.libchecker.view.detail.CenterAlignImageSpan
 import com.absinthe.libchecker.view.snapshot.SnapshotItemView
-import com.chad.library.adapter.base.BaseQuickAdapter
 import com.chad.library.adapter.base.viewholder.BaseViewHolder
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
+import java.text.SimpleDateFormat
+import java.util.Locale
 
 const val ARROW = "→"
 
-class SnapshotAdapter(val lifecycleScope: LifecycleCoroutineScope) :
-  BaseQuickAdapter<SnapshotDiffItem, BaseViewHolder>(0) {
+class SnapshotAdapter(private val cardMode: CardMode = CardMode.NORMAL) : HighlightAdapter<SnapshotDiffItem>() {
 
-  private var loadIconJob: Job? = null
+  private val formatter by unsafeLazy {
+    SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
+  }
+  private val formatterToday by unsafeLazy {
+    SimpleDateFormat("HH:mm:ss", Locale.getDefault())
+  }
 
   override fun onCreateDefViewHolder(parent: ViewGroup, viewType: Int): BaseViewHolder {
     return createBaseViewHolder(
-      SnapshotItemView(
-        ContextThemeWrapper(
-          context,
-          R.style.AppListMaterialCard
-        )
-      ).also {
+      SnapshotItemView(context).also {
         it.layoutParams = ViewGroup.MarginLayoutParams(
           ViewGroup.LayoutParams.MATCH_PARENT,
           ViewGroup.LayoutParams.WRAP_CONTENT
@@ -53,57 +54,26 @@ class SnapshotAdapter(val lifecycleScope: LifecycleCoroutineScope) :
     )
   }
 
-  @SuppressLint("SetTextI18n")
   override fun convert(holder: BaseViewHolder, item: SnapshotDiffItem) {
     (holder.itemView as SnapshotItemView).container.apply {
-      icon.setTag(R.id.app_item_icon_id, item.packageName)
-      lifecycleScope.launch(Dispatchers.IO) {
-        try {
-          val ai = PackageUtils.getPackageInfo(
-            item.packageName,
-            PackageManager.GET_META_DATA
-          ).applicationInfo
-          loadIconJob =
-            AppIconCache.loadIconBitmapAsync(context, ai, ai.uid / 100000, icon)
-        } catch (e: PackageManager.NameNotFoundException) {
-          withContext(Dispatchers.Main) {
-            icon.setImageResource(R.drawable.ic_icon_blueprint)
-          }
-        }
+      setDrawStroke(cardMode == CardMode.DEMO)
+      val packageInfo = runCatching {
+        PackageUtils.getPackageInfo(item.packageName)
+      }.getOrNull()
+
+      if (packageInfo == null) {
+        icon.load(R.drawable.ic_icon_blueprint)
+      } else {
+        icon.load(packageInfo)
       }
 
       if (item.deleted) {
-        addRedMask()
+        setAlphaForAll(0.7f)
       } else {
-        removeRedMask()
+        setAlphaForAll(1.0f)
       }
 
-      var isNewOrDeleted = false
-
-      when {
-        item.deleted || item.newInstalled -> {
-          val background = if (item.deleted) {
-            R.color.material_red_300.toColorStateList(context)
-          } else {
-            R.color.material_green_300.toColorStateList(context)
-          }
-          holder.itemView.backgroundTintList = background
-          val color = context.getColorByAttr(com.google.android.material.R.attr.colorOnSurface)
-          versionInfo.setTextColor(color)
-          packageSizeInfo.setTextColor(color)
-          targetApiInfo.setTextColor(color)
-          abiInfo.setTextColor(color)
-          isNewOrDeleted = true
-        }
-        else -> {
-          holder.itemView.backgroundTintList = null
-          val color = Color.GRAY
-          versionInfo.setTextColor(color)
-          packageSizeInfo.setTextColor(color)
-          targetApiInfo.setTextColor(color)
-          abiInfo.setTextColor(color)
-        }
-      }
+      val isNewOrDeleted = item.deleted || item.newInstalled
 
       stateIndicator.apply {
         added = item.added && !isNewOrDeleted
@@ -112,18 +82,39 @@ class SnapshotAdapter(val lifecycleScope: LifecycleCoroutineScope) :
         moved = item.moved && !isNewOrDeleted
       }
 
-      if (item.isTrackItem) {
-        val imageSpan = ImageSpan(context, R.drawable.ic_track)
-        val spannable = SpannableString(" ${getDiffString(item.labelDiff, isNewOrDeleted)}")
-        spannable.setSpan(imageSpan, 0, 1, Spannable.SPAN_INCLUSIVE_EXCLUSIVE)
-        appName.text = spannable
+      val appNameLabel = if (item.isTrackItem) {
+        buildSpannedString {
+          inSpans(ImageSpan(context, R.drawable.ic_track)) {
+            append(" ")
+          }
+          append(LCAppUtils.getDiffString(item.labelDiff, isNewOrDeleted))
+        }
       } else {
-        appName.text = getDiffString(item.labelDiff, isNewOrDeleted)
+        LCAppUtils.getDiffString(item.labelDiff, isNewOrDeleted)
+      }
+      setOrHighlightText(appName, appNameLabel)
+
+      if (isNewOrDeleted) {
+        val labelDrawable = if (item.newInstalled) {
+          R.drawable.ic_label_new_package.getDrawable(context)!!
+        } else {
+          R.drawable.ic_label_deleted_package.getDrawable(context)!!
+        }
+        val sb = SpannableStringBuilder(appName.text)
+        val spanString = SpannableString("   ")
+        val span = CenterAlignImageSpan(
+          labelDrawable.also {
+            it.setBounds(0, 0, it.intrinsicWidth, it.intrinsicHeight)
+          }
+        )
+        spanString.setSpan(span, 1, 2, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+        sb.append(spanString)
+        appName.text = sb
       }
 
-      packageName.text = item.packageName
+      setOrHighlightText(packageName, item.packageName)
       versionInfo.text =
-        getDiffString(item.versionNameDiff, item.versionCodeDiff, isNewOrDeleted, "%s (%s)")
+        LCAppUtils.getDiffString(item.versionNameDiff, item.versionCodeDiff, isNewOrDeleted, "%s (%s)")
 
       if (item.packageSizeDiff.old > 0L) {
         packageSizeInfo.isVisible = true
@@ -131,12 +122,12 @@ class SnapshotAdapter(val lifecycleScope: LifecycleCoroutineScope) :
           item.packageSizeDiff.old.sizeToString(context),
           item.packageSizeDiff.new?.sizeToString(context)
         )
-        packageSizeInfo.text = getDiffString(sizeDiff, isNewOrDeleted)
+        packageSizeInfo.text = LCAppUtils.getDiffString(sizeDiff, isNewOrDeleted)
       } else {
         packageSizeInfo.isGone = true
       }
 
-      targetApiInfo.text = getDiffString(item.targetApiDiff, isNewOrDeleted, "API %s")
+      targetApiInfo.text = LCAppUtils.getDiffString(item.targetApiDiff, isNewOrDeleted, "API %s")
 
       val oldAbiString = PackageUtils.getAbiString(context, item.abiDiff.old.toInt(), false)
       val oldAbiSpanString: SpannableString
@@ -176,6 +167,13 @@ class SnapshotAdapter(val lifecycleScope: LifecycleCoroutineScope) :
           }
           newAbiSpanString = SpannableString(newPaddingString)
           abiBadgeRes.getDrawable(context)?.let {
+            if ((GlobalValues.advancedOptions and AdvancedOptions.TINT_ABI_LABEL) > 0) {
+              if (abiBadgeRes == R.drawable.ic_abi_label_64bit) {
+                it.setTint(context.getColorByAttr(com.google.android.material.R.attr.colorPrimary))
+              } else {
+                it.setTint(context.getColorByAttr(com.google.android.material.R.attr.colorTertiary))
+              }
+            }
             it.setBounds(0, 0, it.intrinsicWidth, it.intrinsicHeight)
             val span = CenterAlignImageSpan(it)
             newAbiSpanString.setSpan(span, 0, 1, ImageSpan.ALIGN_BOTTOM)
@@ -198,37 +196,24 @@ class SnapshotAdapter(val lifecycleScope: LifecycleCoroutineScope) :
         builder.append(" $ARROW ").append(newAbiSpanString)
       }
       abiInfo.text = builder
+
+      updateTime.isVisible = (GlobalValues.snapshotOptions and SnapshotOptions.SHOW_UPDATE_TIME) > 0
+      if (updateTime.isVisible) {
+        val timeText = if (DateUtils.isTimestampToday(item.updateTime)) {
+          formatterToday.format(item.updateTime)
+        } else {
+          formatter.format(item.updateTime)
+        }
+        updateTime.text = if (item.updateTime <= PREINSTALLED_TIMESTAMP) {
+          context.getString(R.string.snapshot_preinstalled_app)
+        } else {
+          context.getString(R.string.format_last_updated).format(timeText)
+        }
+      }
     }
   }
 
-  fun release() {
-    if (loadIconJob?.isActive == true) {
-      loadIconJob?.cancel()
-    }
-  }
-
-  private fun <T> getDiffString(
-    diff: SnapshotDiffItem.DiffNode<T>,
-    isNewOrDeleted: Boolean = false,
-    format: String = "%s"
-  ): String {
-    return if (diff.old != diff.new && !isNewOrDeleted) {
-      "${format.format(diff.old)} $ARROW ${format.format(diff.new)}"
-    } else {
-      format.format(diff.old)
-    }
-  }
-
-  private fun getDiffString(
-    diff1: SnapshotDiffItem.DiffNode<*>,
-    diff2: SnapshotDiffItem.DiffNode<*>,
-    isNewOrDeleted: Boolean = false,
-    format: String = "%s"
-  ): String {
-    return if ((diff1.old != diff1.new || diff2.old != diff2.new) && !isNewOrDeleted) {
-      "${format.format(diff1.old, diff2.old)} $ARROW ${format.format(diff1.new, diff2.new)}"
-    } else {
-      format.format(diff1.old, diff2.old)
-    }
+  enum class CardMode {
+    NORMAL, DEMO
   }
 }

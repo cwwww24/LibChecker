@@ -1,8 +1,19 @@
 package com.absinthe.libchecker.utils.extensions
 
-import com.absinthe.libchecker.constant.Constants
-import java.io.File
+import androidx.core.text.isDigitsOnly
 
-fun String.isTempApk(): Boolean {
-  return endsWith("${File.separator}${Constants.TEMP_PACKAGE}")
+fun String.toClassDefType(): String {
+  val tmp = "L" + replace(".", "/")
+  return if (last() == '*') {
+    tmp
+  } else {
+    "$tmp;"
+  }
+}
+
+fun String.maybeResourceId(): Boolean {
+  return this.isNotBlank() && this.isDigitsOnly() && this.toLongOrNull() != null
+}
+
+fun String.test() {
 }

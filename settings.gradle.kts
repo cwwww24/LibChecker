@@ -1,20 +1,13 @@
 pluginManagement {
-  resolutionStrategy {
-    eachPlugin {
-      if (requested.id.id == "dev.rikka.tools.refine.gradle-plugin") {
-        useModule("dev.rikka.tools.refine:gradle-plugin:${requested.version}")
-      }
-    }
-  }
   repositories {
-    gradlePluginPortal()
     google()
     mavenCentral()
+    gradlePluginPortal()
   }
 }
 
 dependencyResolutionManagement {
-  repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+  repositoriesMode = RepositoriesMode.FAIL_ON_PROJECT_REPOS
   repositories {
     google()
     mavenCentral()
@@ -22,7 +15,22 @@ dependencyResolutionManagement {
   }
 }
 
+plugins {
+  id("com.gradle.enterprise") version "3.15.1"
+}
+
+gradleEnterprise {
+  buildScan {
+    termsOfServiceUrl = "https://gradle.com/terms-of-service"
+    termsOfServiceAgree = "yes"
+    publishAlways()
+  }
+}
+
+enableFeaturePreview("STABLE_CONFIGURATION_CACHE")
 enableFeaturePreview("TYPESAFE_PROJECT_ACCESSORS")
 
 include(":app", ":hidden-api")
+includeBuild("build-logic")
+
 rootProject.name = "LibChecker"

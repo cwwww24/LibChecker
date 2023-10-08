@@ -1,6 +1,5 @@
 package com.absinthe.libchecker.ui.fragment
 
-import android.annotation.SuppressLint
 import android.content.Context
 import android.view.Gravity
 import android.widget.FrameLayout
@@ -12,18 +11,27 @@ import androidx.recyclerview.widget.RecyclerView
 import androidx.recyclerview.widget.StaggeredGridLayoutManager
 import androidx.viewbinding.ViewBinding
 import com.absinthe.libchecker.R
+import com.absinthe.libchecker.annotation.ACTIVITY
 import com.absinthe.libchecker.annotation.NATIVE
-import com.absinthe.libchecker.base.BaseFragment
-import com.absinthe.libchecker.bean.LibStringItemChip
+import com.absinthe.libchecker.annotation.PERMISSION
+import com.absinthe.libchecker.annotation.PROVIDER
+import com.absinthe.libchecker.annotation.RECEIVER
+import com.absinthe.libchecker.annotation.SERVICE
+import com.absinthe.libchecker.model.LibStringItemChip
 import com.absinthe.libchecker.recyclerview.adapter.detail.LibStringAdapter
+import com.absinthe.libchecker.ui.base.BaseFragment
 import com.absinthe.libchecker.ui.detail.EXTRA_PACKAGE_NAME
 import com.absinthe.libchecker.ui.detail.IDetailContainer
 import com.absinthe.libchecker.ui.fragment.detail.DetailFragmentManager
 import com.absinthe.libchecker.ui.fragment.detail.LibDetailDialogFragment
 import com.absinthe.libchecker.ui.fragment.detail.LocatedCount
 import com.absinthe.libchecker.ui.fragment.detail.MODE_SORT_BY_LIB
+import com.absinthe.libchecker.ui.fragment.detail.PermissionDetailDialogFragment
 import com.absinthe.libchecker.ui.fragment.detail.Sortable
+import com.absinthe.libchecker.ui.fragment.detail.impl.ComponentsAnalysisFragment
+import com.absinthe.libchecker.ui.fragment.detail.impl.NativeAnalysisFragment
 import com.absinthe.libchecker.utils.extensions.addPaddingTop
+import com.absinthe.libchecker.utils.extensions.doOnMainThreadIdle
 import com.absinthe.libchecker.utils.extensions.dp
 import com.absinthe.libchecker.utils.extensions.unsafeLazy
 import com.absinthe.libchecker.view.detail.EmptyListView
@@ -49,7 +57,7 @@ abstract class BaseDetailFragment<T : ViewBinding> : BaseFragment<T>(), Sortable
   protected val viewModel: DetailViewModel by activityViewModels()
   protected val packageName by lazy { arguments?.getString(EXTRA_PACKAGE_NAME).orEmpty() }
   protected val type by lazy { arguments?.getInt(EXTRA_TYPE) ?: NATIVE }
-  protected val adapter by lazy { LibStringAdapter(type) }
+  protected val adapter by lazy { LibStringAdapter(packageName, type, childFragmentManager) }
   protected val emptyView by unsafeLazy {
     EmptyListView(requireContext()).apply {
       layoutParams = FrameLayout.LayoutParams(
@@ -62,12 +70,17 @@ abstract class BaseDetailFragment<T : ViewBinding> : BaseFragment<T>(), Sortable
       text.text = getString(R.string.loading)
     }
   }
-  protected val dividerItemDecoration by lazy { DividerItemDecoration(requireContext(), DividerItemDecoration.VERTICAL) }
+  protected val dividerItemDecoration by lazy {
+    DividerItemDecoration(
+      requireContext(),
+      DividerItemDecoration.VERTICAL
+    )
+  }
   protected var isListReady = false
   protected var afterListReadyTask: Runnable? = null
 
   abstract fun getRecyclerView(): RecyclerView
-  abstract fun getFilterList(text: String): List<LibStringItemChip>?
+  abstract fun getFilterListByText(text: String): List<LibStringItemChip>?
 
   protected abstract val needShowLibDetailDialog: Boolean
 
@@ -91,6 +104,13 @@ abstract class BaseDetailFragment<T : ViewBinding> : BaseFragment<T>(), Sortable
               filterList(it)
             }
           }
+          if (this@BaseDetailFragment is BaseFilterAnalysisFragment) {
+            viewModel.queriedProcess?.let {
+              if (it.isNotEmpty()) {
+                filterItems(it)
+              }
+            }
+          }
         }
       }
     }
@@ -103,6 +123,7 @@ abstract class BaseDetailFragment<T : ViewBinding> : BaseFragment<T>(), Sortable
           openLibDetailDialog(position)
         }
       }
+      setProcessMode(viewModel.processMode)
     }
   }
 
@@ -115,15 +136,31 @@ abstract class BaseDetailFragment<T : ViewBinding> : BaseFragment<T>(), Sortable
     }
   }
 
+  override fun onVisibilityChanged(visible: Boolean) {
+    super.onVisibilityChanged(visible)
+    if (visible) {
+      if (this is ComponentsAnalysisFragment && viewModel.processesMap.isNotEmpty()) {
+        viewModel.processToolIconVisibilityLiveData.postValue(isComponentFragment())
+      } else {
+        if (this is NativeAnalysisFragment && viewModel.nativeSourceMap.isNotEmpty()) {
+          viewModel.processToolIconVisibilityLiveData.postValue(true)
+        } else {
+          viewModel.processToolIconVisibilityLiveData.postValue(false)
+        }
+      }
+    }
+  }
+
   override suspend fun sort() {
     val list = mutableListOf<LibStringItemChip>().also {
       it += adapter.data
     }
-    val itemChip = if (adapter.highlightPosition != -1) {
-      adapter.data[adapter.highlightPosition]
-    } else {
-      null
-    }
+    val itemChip =
+      if (adapter.highlightPosition != -1 && adapter.highlightPosition < adapter.data.size) {
+        adapter.data[adapter.highlightPosition]
+      } else {
+        null
+      }
 
     if (viewModel.sortMode == MODE_SORT_BY_LIB) {
       if (type == NATIVE) {
@@ -147,7 +184,7 @@ abstract class BaseDetailFragment<T : ViewBinding> : BaseFragment<T>(), Sortable
 
   override fun filterList(text: String) {
     adapter.highlightText = text
-    getFilterList(text)?.let {
+    getFilterListByText(text)?.let {
       lifecycleScope.launch(Dispatchers.Main) {
         if (it.isEmpty()) {
           if (getRecyclerView().itemDecorationCount > 0) {
@@ -158,6 +195,10 @@ abstract class BaseDetailFragment<T : ViewBinding> : BaseFragment<T>(), Sortable
         adapter.setDiffNewData(it.toMutableList()) {
           viewModel.itemsCountLiveData.value = LocatedCount(locate = type, count = it.size)
           viewModel.itemsCountList[type] = it.size
+          doOnMainThreadIdle {
+            //noinspection NotifyDataSetChanged
+            adapter.notifyDataSetChanged()
+          }
         }
       }
     }
@@ -165,11 +206,19 @@ abstract class BaseDetailFragment<T : ViewBinding> : BaseFragment<T>(), Sortable
 
   fun getItemsCount() = adapter.itemCount
 
-  @SuppressLint("NotifyDataSetChanged")
+  fun switchProcessMode() {
+    if (isComponentFragment() || isNativeSourceAvailable()) {
+      adapter.switchProcessMode()
+    }
+  }
+
   private fun navigateToComponentImpl(component: String) {
-    val componentPosition = adapter.data.indexOfFirst { it.item.name == component }
+    var componentPosition = adapter.data.indexOfFirst { it.item.name == component }
     if (componentPosition == -1) {
       return
+    }
+    if (adapter.hasHeaderLayout()) {
+      componentPosition++
     }
 
     Timber.d("navigateToComponent: componentPosition = $componentPosition")
@@ -184,19 +233,43 @@ abstract class BaseDetailFragment<T : ViewBinding> : BaseFragment<T>(), Sortable
     }
 
     adapter.setHighlightBackgroundItem(componentPosition)
+    //noinspection NotifyDataSetChanged
     adapter.notifyDataSetChanged()
   }
 
   private fun openLibDetailDialog(position: Int) {
-    val name = adapter.getItem(position).item.name
+    if (position < 0 || position >= adapter.itemCount) {
+      return
+    }
+    val item = adapter.getItem(position)
+    val name = item.item.name
+    val isValidLib = item.chip != null
+
+    if (adapter.type == PERMISSION) {
+      PermissionDetailDialogFragment.newInstance(name)
+        .show(childFragmentManager, PermissionDetailDialogFragment::class.java.name)
+      return
+    }
 
     lifecycleScope.launch(Dispatchers.IO) {
       val regexName = LCRules.getRule(name, adapter.type, true)?.regexName
 
       withContext(Dispatchers.Main) {
-        LibDetailDialogFragment.newInstance(name, adapter.type, regexName)
-          .show(childFragmentManager, tag)
+        LibDetailDialogFragment.newInstance(name, adapter.type, regexName, isValidLib)
+          .show(childFragmentManager, LibDetailDialogFragment::class.java.name)
       }
     }
+  }
+
+  fun isComponentFragment(): Boolean {
+    return type == ACTIVITY || type == SERVICE || type == RECEIVER || type == PROVIDER
+  }
+
+  fun isNativeSourceAvailable(): Boolean {
+    return type == NATIVE && viewModel.nativeSourceMap.isNotEmpty()
+  }
+
+  protected fun hasNonGrantedPermissions(): Boolean {
+    return type == PERMISSION && (viewModel.permissionsItems.value?.any { it.item.size == 0L } == true)
   }
 }

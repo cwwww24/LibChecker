@@ -6,8 +6,13 @@ import android.content.Intent
 import android.content.ServiceConnection
 import android.os.Bundle
 import android.os.IBinder
+import android.view.View
 import androidx.activity.viewModels
 import androidx.coordinatorlayout.widget.CoordinatorLayout
+import androidx.core.view.MenuProvider
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.updatePadding
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import androidx.viewpager2.adapter.FragmentStateAdapter
@@ -15,23 +20,21 @@ import androidx.viewpager2.widget.ViewPager2
 import com.absinthe.libchecker.R
 import com.absinthe.libchecker.annotation.STATUS_INIT_END
 import com.absinthe.libchecker.annotation.STATUS_START_INIT
-import com.absinthe.libchecker.base.BaseActivity
 import com.absinthe.libchecker.constant.Constants
-import com.absinthe.libchecker.constant.GlobalValues
 import com.absinthe.libchecker.constant.OnceTag
-import com.absinthe.libchecker.database.AppItemRepository
-import com.absinthe.libchecker.database.Repositories
 import com.absinthe.libchecker.databinding.ActivityMainBinding
 import com.absinthe.libchecker.services.IWorkerService
 import com.absinthe.libchecker.services.OnWorkerListener
 import com.absinthe.libchecker.services.WorkerService
+import com.absinthe.libchecker.ui.base.BaseActivity
+import com.absinthe.libchecker.ui.fragment.IAppBarContainer
 import com.absinthe.libchecker.ui.fragment.applist.AppListFragment
 import com.absinthe.libchecker.ui.fragment.settings.SettingsFragment
 import com.absinthe.libchecker.ui.fragment.snapshot.SnapshotFragment
 import com.absinthe.libchecker.ui.fragment.statistics.LibReferenceFragment
-import com.absinthe.libchecker.utils.FileUtils
 import com.absinthe.libchecker.utils.LCAppUtils
-import com.absinthe.libchecker.utils.doOnMainThreadIdle
+import com.absinthe.libchecker.utils.extensions.addBackStateHandler
+import com.absinthe.libchecker.utils.extensions.doOnMainThreadIdle
 import com.absinthe.libchecker.utils.extensions.setCurrentItem
 import com.absinthe.libchecker.viewmodel.HomeViewModel
 import com.google.android.material.behavior.HideBottomViewOnScrollBehavior
@@ -41,42 +44,53 @@ import com.microsoft.appcenter.analytics.EventProperties
 import jonathanfinerty.once.Once
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import timber.log.Timber
-import java.io.File
 
 const val PAGE_TRANSFORM_DURATION = 300L
 
-class MainActivity : BaseActivity<ActivityMainBinding>(), INavViewContainer {
+class MainActivity : BaseActivity<ActivityMainBinding>(), INavViewContainer, IAppBarContainer {
 
   private val appViewModel: HomeViewModel by viewModels()
   private val navViewBehavior by lazy { HideBottomViewOnScrollBehavior<BottomNavigationView>() }
   private val workerListener = object : OnWorkerListener.Stub() {
     override fun onReceivePackagesChanged(packageName: String?, action: String?) {
+      if (packageName != null && action != null) {
+        if (action == Intent.ACTION_PACKAGE_REMOVED) {
+          Timber.d("Package $packageName removed")
+        } else {
+          Timber.d("Package $packageName changed")
+        }
+      }
       appViewModel.packageChanged(packageName.orEmpty(), action.orEmpty())
     }
   }
   private val workerServiceConnection = object : ServiceConnection {
     override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
-      workerBinder = IWorkerService.Stub.asInterface(service)
-      runCatching {
-        workerBinder?.registerOnWorkerListener(workerListener)
-      }.onFailure {
-        Timber.e(it)
+      if (service?.pingBinder() == true) {
+        appViewModel.workerBinder = IWorkerService.Stub.asInterface(service)
+        runCatching {
+          appViewModel.workerBinder?.registerOnWorkerListener(workerListener)
+        }.onFailure {
+          Timber.e(it)
+        }
       }
     }
 
     override fun onServiceDisconnected(name: ComponentName?) {
-      workerBinder = null
+      appViewModel.workerBinder = null
     }
   }
-  var workerBinder: IWorkerService? = null
+  private var _menuProvider: MenuProvider? = null
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
 
     initView()
-    preWork()
+    initObserver()
     bindService(
       Intent(this, WorkerService::class.java).apply {
         setPackage(packageName)
@@ -84,27 +98,27 @@ class MainActivity : BaseActivity<ActivityMainBinding>(), INavViewContainer {
       workerServiceConnection,
       Context.BIND_AUTO_CREATE
     )
-    handleIntentFromShortcuts(intent)
-    initObserver()
-    clearApkCache()
+    appViewModel.clearApkCache()
+    handleIntent(intent)
   }
 
   override fun onNewIntent(intent: Intent) {
     super.onNewIntent(intent)
-    handleIntentFromShortcuts(intent)
-  }
-
-  override fun onResume() {
-    super.onResume()
-    if (GlobalValues.shouldRequestChange.value == true) {
-      appViewModel.requestChange(true)
-    }
+    handleIntent(intent)
   }
 
   override fun onDestroy() {
     super.onDestroy()
-    workerBinder?.unregisterOnWorkerListener(workerListener)
+    appViewModel.workerBinder?.unregisterOnWorkerListener(workerListener)
     unbindService(workerServiceConnection)
+  }
+
+  override fun removeMenuProvider(provider: MenuProvider) {
+    // When current menu provider equals to parameter, we can safely remove provided provider.
+    // This fix should only be used when the pop-up Dialog does not define a Menu.
+    if (appViewModel.appListStatus == STATUS_START_INIT || hasWindowFocus() && currentMenuProvider == provider) {
+      super.removeMenuProvider(provider)
+    }
   }
 
   override fun showNavigationView() {
@@ -117,12 +131,36 @@ class MainActivity : BaseActivity<ActivityMainBinding>(), INavViewContainer {
     navViewBehavior.slideDown(binding.navView)
   }
 
+  override fun showProgressBar() {
+    Timber.d("showProgressBar")
+    binding.progressHorizontal.show()
+  }
+
+  override fun hideProgressBar() {
+    Timber.d("hideProgressBar")
+    binding.progressHorizontal.hide()
+  }
+
+  override var currentMenuProvider: MenuProvider?
+    get() = _menuProvider
+    set(value) {
+      _menuProvider = value
+    }
+
+  override fun scheduleAppbarLiftingStatus(isLifted: Boolean) {
+    binding.appbar.isLifted = isLifted
+  }
+
+  override fun setLiftOnScrollTargetView(targetView: View) {
+    binding.appbar.setLiftOnScrollTargetView(targetView)
+  }
+
   private fun initView() {
-    setAppBar(binding.appbar, binding.toolbar)
-    binding.root.bringChildToFront(binding.appbar)
+    setSupportActionBar(binding.toolbar)
     supportActionBar?.title = LCAppUtils.setTitle(this)
 
     binding.apply {
+      root.bringChildToFront(binding.appbar)
       viewpager.apply {
         adapter = object : FragmentStateAdapter(this@MainActivity) {
           override fun getItemCount(): Int {
@@ -150,6 +188,7 @@ class MainActivity : BaseActivity<ActivityMainBinding>(), INavViewContainer {
         // 禁止左右滑动
         isUserInputEnabled = false
         offscreenPageLimit = 2
+        fixViewPager2Insets(this)
       }
 
       navView.apply {
@@ -159,7 +198,6 @@ class MainActivity : BaseActivity<ActivityMainBinding>(), INavViewContainer {
         requestLayout()
         // 当 ViewPager 切换页面时，改变 ViewPager 的显示
         setOnItemSelectedListener {
-
           fun performClickNavigationItem(index: Int) {
             if (binding.viewpager.currentItem != index) {
               if (!binding.viewpager.isFakeDragging) {
@@ -190,15 +228,45 @@ class MainActivity : BaseActivity<ActivityMainBinding>(), INavViewContainer {
           true
         }
         setOnClickListener { /*Do nothing*/ }
+        fixBottomNavigationViewInsets(this)
       }
+    }
+
+    onBackPressedDispatcher.addBackStateHandler(
+      lifecycleOwner = this,
+      enabledState = { binding.toolbar.hasExpandedActionView() },
+      handler = { binding.toolbar.collapseActionView() }
+    )
+  }
+
+  /**
+   * 覆盖掉 BottomNavigationView 内部的 OnApplyWindowInsetsListener 并避免其被软键盘顶起来
+   * @see BottomNavigationView.applyWindowInsets
+   */
+  private fun fixBottomNavigationViewInsets(view: BottomNavigationView) {
+    ViewCompat.setOnApplyWindowInsetsListener(view) { _, windowInsets ->
+      // 这里不直接使用 windowInsets.getInsets(WindowInsetsCompat.Type.navigationBars())
+      // 因为它的结果可能受到 insets 传播链上层某环节的影响，出现了错误的 navigationBarsInsets
+      val navigationBarsInsets =
+        ViewCompat.getRootWindowInsets(view)!!.getInsets(WindowInsetsCompat.Type.navigationBars())
+      view.updatePadding(bottom = navigationBarsInsets.bottom)
+      windowInsets
     }
   }
 
-  private fun handleIntentFromShortcuts(intent: Intent) {
+  private fun fixViewPager2Insets(view: ViewPager2) {
+    ViewCompat.setOnApplyWindowInsetsListener(view) { _, windowInsets ->
+      /* Do nothing */
+      windowInsets
+    }
+  }
+
+  private fun handleIntent(intent: Intent) {
     when (intent.action) {
       Constants.ACTION_APP_LIST -> binding.viewpager.setCurrentItem(0, false)
       Constants.ACTION_STATISTICS -> binding.viewpager.setCurrentItem(1, false)
       Constants.ACTION_SNAPSHOT -> binding.viewpager.setCurrentItem(2, false)
+      Intent.ACTION_APPLICATION_PREFERENCES -> binding.viewpager.setCurrentItem(3, false)
     }
     Analytics.trackEvent(
       Constants.Event.LAUNCH_ACTION,
@@ -211,49 +279,43 @@ class MainActivity : BaseActivity<ActivityMainBinding>(), INavViewContainer {
       if (!Once.beenDone(Once.THIS_APP_INSTALL, OnceTag.FIRST_LAUNCH)) {
         initItems()
       } else {
-        lifecycleScope.launch(Dispatchers.IO) {
-          do {
-            workerBinder?.initKotlinUsage()
-            delay(300)
-          } while (workerBinder == null)
-        }
+        initFeatures()
       }
 
-      lifecycleScope.launchWhenStarted {
-        effect.collect {
-          when (it) {
-            is HomeViewModel.Effect.ReloadApps -> {
-              binding.viewpager.setCurrentItem(0, true)
-            }
-            is HomeViewModel.Effect.UpdateAppListStatus -> {
-              if (it.status == STATUS_START_INIT) {
-                doOnMainThreadIdle {
-                  hideNavigationView()
-                }
-              } else if (it.status == STATUS_INIT_END) {
-                lifecycleScope.launch(Dispatchers.IO) {
-                  do {
-                    workerBinder?.initKotlinUsage()
-                    delay(300)
-                  } while (workerBinder == null)
-                }
-              }
-            }
-            else -> {}
+      effect.onEach {
+        when (it) {
+          is HomeViewModel.Effect.ReloadApps -> {
+            binding.viewpager.setCurrentItem(0, true)
           }
+
+          is HomeViewModel.Effect.UpdateAppListStatus -> {
+            if (it.status == STATUS_START_INIT) {
+              doOnMainThreadIdle {
+                hideNavigationView()
+              }
+            } else if (it.status == STATUS_INIT_END) {
+              doOnMainThreadIdle {
+                showNavigationView()
+              }
+              initFeatures()
+            }
+          }
+
+          else -> {}
         }
-      }
+      }.launchIn(lifecycleScope)
     }
   }
 
-  private fun clearApkCache() {
-    FileUtils.delete(File(externalCacheDir, Constants.TEMP_PACKAGE))
-  }
+  private fun initFeatures() {
+    lifecycleScope.launch {
+      while (appViewModel.workerBinder == null) {
+        delay(300)
+      }
 
-  private fun preWork() {
-    lifecycleScope.launch(Dispatchers.IO) {
-      if (AppItemRepository.shouldClearDiffItemsInDatabase) {
-        Repositories.lcRepository.deleteAllSnapshotDiffItems()
+      withContext(Dispatchers.Main) {
+        Timber.d("initFeatures")
+        appViewModel.workerBinder?.initFeatures()
       }
     }
   }

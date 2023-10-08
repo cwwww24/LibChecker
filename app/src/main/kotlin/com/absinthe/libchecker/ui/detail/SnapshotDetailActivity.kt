@@ -1,14 +1,16 @@
 package com.absinthe.libchecker.ui.detail
 
-import android.annotation.SuppressLint
-import android.content.pm.PackageManager
+import android.graphics.Bitmap
 import android.os.Bundle
 import android.view.Gravity
 import android.view.Menu
+import android.view.MenuInflater
 import android.view.MenuItem
 import android.widget.FrameLayout
 import androidx.activity.viewModels
+import androidx.core.view.MenuProvider
 import androidx.core.view.isVisible
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.SimpleItemAnimator
 import coil.load
@@ -21,15 +23,17 @@ import com.absinthe.libchecker.annotation.PERMISSION
 import com.absinthe.libchecker.annotation.PROVIDER
 import com.absinthe.libchecker.annotation.RECEIVER
 import com.absinthe.libchecker.annotation.SERVICE
-import com.absinthe.libchecker.bean.ADDED
-import com.absinthe.libchecker.bean.CHANGED
-import com.absinthe.libchecker.bean.MOVED
-import com.absinthe.libchecker.bean.REMOVED
-import com.absinthe.libchecker.bean.SnapshotDetailItem
-import com.absinthe.libchecker.bean.SnapshotDiffItem
+import com.absinthe.libchecker.compat.IntentCompat
+import com.absinthe.libchecker.compat.VersionCompat
 import com.absinthe.libchecker.constant.Constants
 import com.absinthe.libchecker.database.Repositories
 import com.absinthe.libchecker.databinding.ActivitySnapshotDetailBinding
+import com.absinthe.libchecker.model.ADDED
+import com.absinthe.libchecker.model.CHANGED
+import com.absinthe.libchecker.model.MOVED
+import com.absinthe.libchecker.model.REMOVED
+import com.absinthe.libchecker.model.SnapshotDetailItem
+import com.absinthe.libchecker.model.SnapshotDiffItem
 import com.absinthe.libchecker.recyclerview.VerticalSpacesItemDecoration
 import com.absinthe.libchecker.recyclerview.adapter.snapshot.ARROW
 import com.absinthe.libchecker.recyclerview.adapter.snapshot.SnapshotDetailAdapter
@@ -40,9 +44,9 @@ import com.absinthe.libchecker.recyclerview.adapter.snapshot.node.SnapshotTitleN
 import com.absinthe.libchecker.ui.app.CheckPackageOnResumingActivity
 import com.absinthe.libchecker.utils.LCAppUtils
 import com.absinthe.libchecker.utils.PackageUtils
-import com.absinthe.libchecker.utils.Toasty
 import com.absinthe.libchecker.utils.extensions.addPaddingTop
 import com.absinthe.libchecker.utils.extensions.dp
+import com.absinthe.libchecker.utils.extensions.launchDetailPage
 import com.absinthe.libchecker.utils.extensions.sizeToString
 import com.absinthe.libchecker.utils.extensions.unsafeLazy
 import com.absinthe.libchecker.view.detail.AppBarStateChangeListener
@@ -60,16 +64,30 @@ import me.zhanghai.android.appiconloader.AppIconLoader
 import rikka.core.util.ClipboardUtils
 
 const val EXTRA_ENTITY = "EXTRA_ENTITY"
+const val EXTRA_ICON = "EXTRA_ICON"
 
-class SnapshotDetailActivity : CheckPackageOnResumingActivity<ActivitySnapshotDetailBinding>() {
+class SnapshotDetailActivity :
+  CheckPackageOnResumingActivity<ActivitySnapshotDetailBinding>(),
+  MenuProvider {
 
   private lateinit var entity: SnapshotDiffItem
 
-  private val adapter by unsafeLazy { SnapshotDetailAdapter(lifecycleScope) }
+  private val adapter = SnapshotDetailAdapter()
   private val viewModel: SnapshotViewModel by viewModels()
-  private val _entity by unsafeLazy { intent.getSerializableExtra(EXTRA_ENTITY) as? SnapshotDiffItem }
+  private val _entity by unsafeLazy {
+    IntentCompat.getSerializableExtra<SnapshotDiffItem>(
+      intent,
+      EXTRA_ENTITY
+    )
+  }
+  private val _icon by unsafeLazy {
+    IntentCompat.getParcelableExtra<Bitmap>(
+      intent,
+      EXTRA_ICON
+    )
+  }
 
-  override fun requirePackageName() = entity.packageName
+  override fun requirePackageName() = entity.packageName.takeIf { it.contains("/").not() }
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
@@ -83,22 +101,21 @@ class SnapshotDetailActivity : CheckPackageOnResumingActivity<ActivitySnapshotDe
     }
   }
 
-  override fun onCreateOptionsMenu(menu: Menu): Boolean {
+  override fun onCreateMenu(menu: Menu, menuInflater: MenuInflater) {
     menuInflater.inflate(R.menu.snapshot_detail_menu, menu)
-    return super.onCreateOptionsMenu(menu)
   }
 
-  override fun onOptionsItemSelected(item: MenuItem): Boolean {
-    if (item.itemId == android.R.id.home) {
+  override fun onMenuItemSelected(menuItem: MenuItem): Boolean {
+    if (menuItem.itemId == android.R.id.home) {
       finish()
-    } else if (item.itemId == R.id.report_generate) {
+    } else if (menuItem.itemId == R.id.report_generate) {
       generateReport()
     }
-    return super.onOptionsItemSelected(item)
+    return true
   }
 
-  @SuppressLint("SetTextI18n")
   private fun initView() {
+    addMenuProvider(this, this, Lifecycle.State.STARTED)
     setSupportActionBar(binding.toolbar)
     supportActionBar?.apply {
       setDisplayHomeAsUpEnabled(true)
@@ -114,6 +131,7 @@ class SnapshotDetailActivity : CheckPackageOnResumingActivity<ActivitySnapshotDe
       headerLayout.addOnOffsetChangedListener(object : AppBarStateChangeListener() {
         override fun onStateChanged(appBarLayout: AppBarLayout, state: State) {
           collapsingToolbar.isTitleEnabled = state == State.COLLAPSED
+          headerLayout.isLifted = state == State.COLLAPSED
         }
       })
       list.apply {
@@ -130,33 +148,38 @@ class SnapshotDetailActivity : CheckPackageOnResumingActivity<ActivitySnapshotDe
           false,
           this@SnapshotDetailActivity
         )
-        val icon = try {
-          appIconLoader.loadIcon(
-            PackageUtils.getPackageInfo(
-              entity.packageName,
-              PackageManager.GET_META_DATA
-            ).applicationInfo
-          )
-        } catch (e: PackageManager.NameNotFoundException) {
-          null
+        runCatching {
+          val icon = if (entity.packageName.contains("/").not() || _icon == null) {
+            appIconLoader.loadIcon(
+              PackageUtils.getPackageInfo(entity.packageName).applicationInfo
+            )
+          } else {
+            _icon
+          }
+          load(icon)
         }
-        load(icon)
         setOnClickListener {
           lifecycleScope.launch {
             val lcItem = Repositories.lcRepository.getItem(entity.packageName) ?: return@launch
-            LCAppUtils.launchDetailPage(this@SnapshotDetailActivity, lcItem)
+            launchDetailPage(lcItem)
           }
         }
       }
-      snapshotTitle.appNameView.text = getDiffString(entity.labelDiff, isNewOrDeleted)
-      snapshotTitle.packageNameView.text = entity.packageName
-      snapshotTitle.versionInfoView.text = getDiffString(
+      snapshotTitle.appNameView.text = LCAppUtils.getDiffString(entity.labelDiff, isNewOrDeleted)
+      snapshotTitle.packageNameView.text = entity.packageName.takeIf { it.contains("/").not() }
+        ?: "${entity.packageName.substringBeforeLast("/")} $ARROW ${
+          entity.packageName.substringAfterLast(
+            "/"
+          )
+        }"
+      snapshotTitle.versionInfoView.text = LCAppUtils.getDiffString(
         entity.versionNameDiff,
         entity.versionCodeDiff,
         isNewOrDeleted,
         "%s (%s)"
       )
-      snapshotTitle.targetApiView.text = "API ${getDiffString(entity.targetApiDiff, isNewOrDeleted)}"
+      snapshotTitle.targetApiView.text =
+        String.format("API %s", LCAppUtils.getDiffString(entity.targetApiDiff, isNewOrDeleted))
 
       if (entity.packageSizeDiff.old > 0L) {
         snapshotTitle.packageSizeView.isVisible = true
@@ -164,7 +187,7 @@ class SnapshotDetailActivity : CheckPackageOnResumingActivity<ActivitySnapshotDe
           entity.packageSizeDiff.old.sizeToString(this@SnapshotDetailActivity),
           entity.packageSizeDiff.new?.sizeToString(this@SnapshotDetailActivity)
         )
-        snapshotTitle.packageSizeView.text = getDiffString(sizeDiff, isNewOrDeleted)
+        snapshotTitle.packageSizeView.text = LCAppUtils.getDiffString(sizeDiff, isNewOrDeleted)
       } else {
         snapshotTitle.packageSizeView.isVisible = false
       }
@@ -273,8 +296,7 @@ class SnapshotDetailActivity : CheckPackageOnResumingActivity<ActivitySnapshotDe
 
       lifecycleScope.launch {
         val lcItem = Repositories.lcRepository.getItem(entity.packageName) ?: return@launch
-        LCAppUtils.launchDetailPage(
-          this@SnapshotDetailActivity,
+        launchDetailPage(
           item = lcItem,
           refName = item.name,
           refType = item.itemType
@@ -296,31 +318,6 @@ class SnapshotDetailActivity : CheckPackageOnResumingActivity<ActivitySnapshotDe
     return returnList
   }
 
-  private fun <T> getDiffString(
-    diff: SnapshotDiffItem.DiffNode<T>,
-    isNewOrDeleted: Boolean = false,
-    format: String = "%s"
-  ): String {
-    return if (diff.old != diff.new && !isNewOrDeleted) {
-      "${format.format(diff.old)} $ARROW ${format.format(diff.new)}"
-    } else {
-      format.format(diff.old)
-    }
-  }
-
-  private fun getDiffString(
-    diff1: SnapshotDiffItem.DiffNode<*>,
-    diff2: SnapshotDiffItem.DiffNode<*>,
-    isNewOrDeleted: Boolean = false,
-    format: String = "%s"
-  ): String {
-    return if ((diff1.old != diff1.new || diff2.old != diff2.new) && !isNewOrDeleted) {
-      "${format.format(diff1.old, diff2.old)} $ARROW ${format.format(diff1.new, diff2.new)}"
-    } else {
-      format.format(diff1.old, diff2.old)
-    }
-  }
-
   private fun generateReport() {
     val sb = StringBuilder()
     sb.append(binding.snapshotTitle.appNameView.text).appendLine()
@@ -339,12 +336,14 @@ class SnapshotDetailActivity : CheckPackageOnResumingActivity<ActivitySnapshotDe
         is SnapshotTitleNode -> {
           sb.append("[${getComponentName(it.type)}]").appendLine()
         }
+
         is SnapshotComponentNode -> {
           sb.append(getDiffTypeLabel(it.item.diffType))
             .append(" ")
             .append(it.item.title)
             .appendLine()
         }
+
         is SnapshotNativeNode -> {
           sb.append(getDiffTypeLabel(it.item.diffType))
             .append(" ")
@@ -357,7 +356,7 @@ class SnapshotDetailActivity : CheckPackageOnResumingActivity<ActivitySnapshotDe
       }
     }
     ClipboardUtils.put(this, sb.toString())
-    Toasty.showShort(this, R.string.toast_copied_to_clipboard)
+    VersionCompat.showCopiedOnClipboardToast(this)
   }
 
   private fun getComponentName(@LibType type: Int): String {

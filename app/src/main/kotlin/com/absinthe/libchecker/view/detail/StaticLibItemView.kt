@@ -8,8 +8,8 @@ import android.view.ContextThemeWrapper
 import android.view.ViewGroup
 import androidx.appcompat.widget.AppCompatTextView
 import com.absinthe.libchecker.R
-import com.absinthe.libchecker.bean.LibChip
 import com.absinthe.libchecker.constant.GlobalValues
+import com.absinthe.libchecker.model.LibChip
 import com.absinthe.libchecker.utils.extensions.getColorByAttr
 import com.absinthe.libchecker.utils.extensions.getDimensionPixelSize
 import com.absinthe.libchecker.utils.extensions.valueUnsafe
@@ -58,7 +58,7 @@ class StaticLibItemView(context: Context) : AViewGroup(context) {
       }
     } else {
       if (chip == null) {
-        chip = Chip(ContextThemeWrapper(context, R.style.App_LibChip)).apply {
+        chip = Chip(context).apply {
           layoutParams = LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, 48.dp)
           addView(this)
         }

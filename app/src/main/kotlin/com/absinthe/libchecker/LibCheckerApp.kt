@@ -1,16 +1,22 @@
 package com.absinthe.libchecker
 
-import android.annotation.SuppressLint
 import android.app.Application
 import android.content.Context
-import androidx.window.core.ExperimentalWindowApi
+import android.content.pm.PackageManager
+import androidx.appcompat.app.AppCompatDelegate
+import androidx.window.embedding.RuleController
 import androidx.window.embedding.SplitController
-import com.absinthe.libchecker.app.Global
+import coil.Coil
+import coil.ImageLoader
+import com.absinthe.libchecker.app.MainLooperFilter
+import com.absinthe.libchecker.app.SystemServices
 import com.absinthe.libchecker.constant.Constants
 import com.absinthe.libchecker.constant.GlobalValues
 import com.absinthe.libchecker.database.Repositories
-import com.absinthe.libchecker.utils.LCAppUtils
+import com.absinthe.libchecker.utils.OsUtils
 import com.absinthe.libchecker.utils.PackageUtils
+import com.absinthe.libchecker.utils.UiUtils
+import com.absinthe.libchecker.utils.extensions.dp
 import com.absinthe.libchecker.utils.timber.ReleaseTree
 import com.absinthe.libchecker.utils.timber.ThreadAwareDebugTree
 import com.absinthe.libraries.utils.utils.Utility
@@ -21,12 +27,13 @@ import com.jakewharton.processphoenix.ProcessPhoenix
 import com.microsoft.appcenter.AppCenter
 import com.microsoft.appcenter.analytics.Analytics
 import com.microsoft.appcenter.crashes.Crashes
+import java.util.UUID
 import jonathanfinerty.once.Once
+import me.zhanghai.android.appiconloader.coil.AppIconFetcher
+import me.zhanghai.android.appiconloader.coil.AppIconKeyer
 import org.lsposed.hiddenapibypass.HiddenApiBypass
-import rikka.material.app.DayNightDelegate
 import rikka.material.app.LocaleDelegate
 import timber.log.Timber
-import java.util.UUID
 
 class LibCheckerApp : Application() {
 
@@ -37,15 +44,17 @@ class LibCheckerApp : Application() {
       return
     }
 
-    if (LCAppUtils.atLeastP()) {
+    if (OsUtils.atLeastP()) {
       HiddenApiBypass.addHiddenApiExemptions("")
     }
 
     app = this
     if (!BuildConfig.DEBUG && GlobalValues.isAnonymousAnalyticsEnabled.value == true) {
       AppCenter.start(
-        this, Constants.APP_CENTER_SECRET,
-        Analytics::class.java, Crashes::class.java
+        this,
+        BuildConfig.APP_CENTER_SECRET,
+        Analytics::class.java,
+        Crashes::class.java
       )
     }
 
@@ -60,44 +69,62 @@ class LibCheckerApp : Application() {
       if (GlobalValues.repo == Constants.REPO_GITHUB) {
         LCRemoteRepo.Github
       } else {
-        LCRemoteRepo.Gitee
+        LCRemoteRepo.Gitlab
       }
     )
     Utility.init(this)
     LocaleDelegate.defaultLocale = GlobalValues.locale
-    DayNightDelegate.setApplicationContext(this)
-    DayNightDelegate.setDefaultNightMode(LCAppUtils.getNightMode(GlobalValues.darkMode))
+    AppCompatDelegate.setDefaultNightMode(UiUtils.getNightMode())
     Once.initialise(this)
     Repositories.init(this)
-    Repositories.checkRulesDatabase()
+    DynamicColors.applyToActivitiesIfAvailable(this)
     initSplitController()
 
-    if (GlobalValues.md3Theme) {
-      DynamicColors.applyToActivitiesIfAvailable(this)
+    Coil.setImageLoader {
+      ImageLoader.Builder(this)
+        .components {
+          add(AppIconKeyer())
+          add(AppIconFetcher.Factory(40.dp, false, this@LibCheckerApp))
+        }
+        .build()
     }
   }
 
   override fun attachBaseContext(base: Context?) {
     super.attachBaseContext(base)
-    Global.start()
+    MainLooperFilter.start()
   }
 
-  @OptIn(ExperimentalWindowApi::class)
   private fun initSplitController() {
-    SplitController.initialize(this, R.xml.main_split_config)
+    val ratio = UiUtils.getScreenAspectRatio()
+    val hasHinge = if (OsUtils.atLeastR()) {
+      SystemServices.packageManager.hasSystemFeature(PackageManager.FEATURE_SENSOR_HINGE_ANGLE)
+    } else {
+      false
+    }
+    Timber.d("initSplitController: getScreenAspectRatio: $ratio, hasHinge=$hasHinge")
+    runCatching {
+      if (SplitController.getInstance(this).splitSupportStatus == SplitController.SplitSupportStatus.SPLIT_AVAILABLE) {
+        RuleController.getInstance(this).setRules(
+          if (hasHinge || ratio in 0.85f..1.15f) {
+            RuleController.parseRules(this, R.xml.main_split_config_foldable)
+          } else {
+            RuleController.parseRules(this, R.xml.main_split_config)
+          }
+        )
+      }
+    }
   }
 
   companion object {
-    @SuppressLint("StaticFieldLeak")
+    //noinspection StaticFieldLeak
     lateinit var app: Application
 
     fun generateAuthKey(): Int {
       if (GlobalValues.uuid.isEmpty()) {
         GlobalValues.uuid = UUID.randomUUID().toString()
       }
-      return (GlobalValues.uuid.hashCode() + PackageUtils.getPackageInfo(app.packageName).firstInstallTime).mod(
-        90000
-      ) + 10000
+      return (GlobalValues.uuid.hashCode() + PackageUtils.getPackageInfo(app.packageName).firstInstallTime).mod(90000) + 10000
     }
   }
 }

@@ -5,7 +5,6 @@ import android.view.ContextThemeWrapper
 import android.view.Gravity
 import android.view.ViewGroup
 import android.widget.FrameLayout
-import android.widget.ViewFlipper
 import androidx.appcompat.widget.AppCompatImageView
 import androidx.appcompat.widget.AppCompatTextView
 import androidx.core.view.marginTop
@@ -13,8 +12,9 @@ import com.absinthe.libchecker.R
 import com.absinthe.libchecker.utils.extensions.getDimensionPixelSize
 import com.absinthe.libchecker.utils.extensions.getResourceIdByAttr
 import com.absinthe.libchecker.view.AViewGroup
-import com.absinthe.libchecker.view.app.BottomSheetHeaderView
 import com.absinthe.libchecker.view.app.IHeaderView
+import com.absinthe.libraries.utils.view.BottomSheetHeaderView
+import com.absinthe.libraries.utils.view.HeightAnimatableViewFlipper
 import com.airbnb.lottie.LottieAnimationView
 import com.airbnb.lottie.LottieDrawable
 import com.google.android.material.button.MaterialButton
@@ -27,7 +27,7 @@ class CloudRulesDialogView(context: Context) : AViewGroup(context), IHeaderView 
     title.text = context.getString(R.string.cloud_rules)
   }
 
-  val viewFlipper = ViewFlipper(context).apply {
+  private val viewFlipper = HeightAnimatableViewFlipper(context).apply {
     layoutParams =
       LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
     setInAnimation(context, R.anim.anim_fade_in)
@@ -198,5 +198,11 @@ class CloudRulesDialogView(context: Context) : AViewGroup(context), IHeaderView 
 
   override fun getHeaderView(): BottomSheetHeaderView {
     return header
+  }
+
+  fun showContent() {
+    if (viewFlipper.displayedChildView != cloudRulesContentView) {
+      viewFlipper.show(cloudRulesContentView)
+    }
   }
 }

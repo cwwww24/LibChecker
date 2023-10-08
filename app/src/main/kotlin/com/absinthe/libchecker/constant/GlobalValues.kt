@@ -4,12 +4,11 @@ import android.content.SharedPreferences
 import androidx.core.content.edit
 import androidx.lifecycle.MutableLiveData
 import com.absinthe.libchecker.BuildConfig
-import com.absinthe.libchecker.annotation.NATIVE
 import com.absinthe.libchecker.ui.fragment.detail.MODE_SORT_BY_SIZE
 import com.absinthe.libchecker.utils.LCAppUtils
 import com.absinthe.libchecker.utils.SPDelegates
 import com.absinthe.libchecker.utils.SPUtils
-import com.absinthe.rulesbundle.LCRules
+import com.absinthe.libchecker.utils.extensions.unsafeLazy
 import java.util.Locale
 
 const val SP_NAME = "${BuildConfig.APPLICATION_ID}_preferences"
@@ -20,32 +19,38 @@ object GlobalValues {
     return SPUtils.sp
   }
 
-  var repo: String by SPDelegates(Constants.PREF_RULES_REPO, Constants.REPO_GITEE)
+  var advancedOptions: Int by SPDelegates(Constants.PREF_ADVANCED_OPTIONS, AdvancedOptions.DEFAULT_OPTIONS)
+  val advancedOptionsLiveData: MutableLiveData<Int> = MutableLiveData(advancedOptions)
+
+  var itemAdvancedOptions: Int by SPDelegates(Constants.PREF_ITEM_ADVANCED_OPTIONS, AdvancedOptions.ITEM_DEFAULT_OPTIONS)
+  val itemAdvancedOptionsLiveData: MutableLiveData<Int> = MutableLiveData(itemAdvancedOptions)
+
+  var libReferenceOptions: Int by SPDelegates(Constants.PREF_LIB_REF_OPTIONS, LibReferenceOptions.DEFAULT_OPTIONS)
+  val libReferenceOptionsLiveData: MutableLiveData<Int> = MutableLiveData(libReferenceOptions)
+
+  var snapshotOptions: Int by SPDelegates(Constants.PREF_SNAPSHOT_OPTIONS, SnapshotOptions.DEFAULT_OPTIONS)
+  val snapshotOptionsLiveData: MutableLiveData<Int> = MutableLiveData(snapshotOptions)
+
+  var repo: String by SPDelegates(Constants.PREF_RULES_REPO, Constants.REPO_GITLAB)
 
   var snapshotTimestamp: Long by SPDelegates(Constants.PREF_SNAPSHOT_TIMESTAMP, 0)
 
-  var localRulesVersion: Int by SPDelegates(Constants.PREF_LOCAL_RULES_VERSION, LCRules.getVersion())
-
-  var currentLibRefType: Int by SPDelegates(Constants.CURRENT_LIB_REF_TYPE, NATIVE)
-
   var debugMode: Boolean by SPDelegates(Constants.PREF_DEBUG_MODE, false)
+
+  var snapshotKeep: String by SPDelegates(Constants.PREF_SNAPSHOT_KEEP, Constants.SNAPSHOT_DEFAULT)
 
   var darkMode: String by SPDelegates(Constants.PREF_DARK_MODE, Constants.DARK_MODE_FOLLOW_SYSTEM)
 
   var rengeTheme: Boolean by SPDelegates(Constants.RENGE_THEME, false)
 
-  var appSortMode: Int by SPDelegates(Constants.PREF_APP_SORT_MODE, Constants.SORT_MODE_DEFAULT)
-
   var libSortMode: Int by SPDelegates(Constants.PREF_LIB_SORT_MODE, MODE_SORT_BY_SIZE)
+
+  var processMode: Boolean by SPDelegates(Constants.PREF_PROCESS_MODE, false)
 
   var libReferenceThreshold: Int by SPDelegates(Constants.PREF_LIB_REF_THRESHOLD, 2)
 
-  var md3Theme: Boolean by SPDelegates(Constants.PREF_MD3, false)
-
-  val shouldRequestChange: MutableLiveData<Boolean> = MutableLiveData(false)
-
   val isShowSystemApps: MutableLiveData<Boolean> =
-    MutableLiveData(getPreferences().getBoolean(Constants.PREF_SHOW_SYSTEM_APPS, false))
+    MutableLiveData((advancedOptions and AdvancedOptions.SHOW_SYSTEM_APPS) > 0)
 
   val isColorfulIcon: MutableLiveData<Boolean> =
     MutableLiveData(getPreferences().getBoolean(Constants.PREF_COLORFUL_ICON, true))
@@ -53,13 +58,11 @@ object GlobalValues {
   val isAnonymousAnalyticsEnabled: MutableLiveData<Boolean> =
     MutableLiveData(getPreferences().getBoolean(Constants.PREF_ANONYMOUS_ANALYTICS, true))
 
-  val appSortModeLiveData: MutableLiveData<Int> = MutableLiveData(appSortMode)
-
   val libSortModeLiveData: MutableLiveData<Int> = MutableLiveData(libSortMode)
 
   val libReferenceThresholdLiveData: MutableLiveData<Int> = MutableLiveData(libReferenceThreshold)
 
-  val season = LCAppUtils.getCurrentSeason()
+  val season by unsafeLazy { LCAppUtils.getCurrentSeason() }
 
   var locale: Locale = Locale.getDefault()
     get() {
@@ -74,5 +77,9 @@ object GlobalValues {
       getPreferences().edit { putString(Constants.PREF_LOCALE, value.toLanguageTag()) }
     }
 
-  var uuid: String by SPDelegates(Constants.PREF_UUID, "")
+  var uuid: String by SPDelegates(Constants.PREF_UUID, String())
+
+  var isGitHubUnreachable = true
+
+  var trackItemsChanged = false
 }

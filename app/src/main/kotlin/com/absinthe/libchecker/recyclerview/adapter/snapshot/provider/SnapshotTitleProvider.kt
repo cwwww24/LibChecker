@@ -5,7 +5,8 @@ import android.util.SparseArray
 import android.view.View
 import android.view.ViewGroup
 import android.widget.ImageView
-import androidx.lifecycle.LifecycleCoroutineScope
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.absinthe.libchecker.R
 import com.absinthe.libchecker.annotation.ACTIVITY
@@ -29,7 +30,7 @@ import kotlinx.coroutines.withContext
 
 const val SNAPSHOT_TITLE_PROVIDER = 1
 
-class SnapshotTitleProvider(val lifecycleScope: LifecycleCoroutineScope) : BaseNodeProvider() {
+class SnapshotTitleProvider : BaseNodeProvider() {
 
   override val itemViewType: Int = SNAPSHOT_TITLE_PROVIDER
   override val layoutId: Int = 0
@@ -74,8 +75,8 @@ class SnapshotTitleProvider(val lifecycleScope: LifecycleCoroutineScope) : BaseN
       }
 
       countAdapter.setList(finalList)
-    } ?: let {
-      lifecycleScope.launch(Dispatchers.IO) {
+    } ?: run {
+      (context as? LifecycleOwner)?.lifecycleScope?.launch(Dispatchers.Default) {
         @Suppress("UNCHECKED_CAST")
         (item.childNode as List<BaseSnapshotNode>).forEach { diffNode ->
           countList[diffNode.item.diffType]++

@@ -10,8 +10,9 @@ import com.absinthe.libchecker.recyclerview.VerticalSpacesItemDecoration
 import com.absinthe.libchecker.recyclerview.adapter.detail.AppBundleAdapter
 import com.absinthe.libchecker.utils.extensions.dp
 import com.absinthe.libchecker.utils.extensions.unsafeLazy
-import com.absinthe.libchecker.view.app.BottomSheetHeaderView
 import com.absinthe.libchecker.view.app.IHeaderView
+import com.absinthe.libraries.utils.manager.SystemBarManager
+import com.absinthe.libraries.utils.view.BottomSheetHeaderView
 
 class AppBundleBottomSheetView(context: Context) : LinearLayout(context), IHeaderView {
 
@@ -43,7 +44,13 @@ class AppBundleBottomSheetView(context: Context) : LinearLayout(context), IHeade
 
   init {
     orientation = VERTICAL
-    setPadding(24.dp, 16.dp, 24.dp, 0)
+    val padding = 16.dp
+    setPadding(
+      padding,
+      padding,
+      padding,
+      (padding - SystemBarManager.navigationBarSize).coerceAtLeast(0)
+    )
     addView(header)
     addView(list)
   }
